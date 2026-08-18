@@ -1,0 +1,6 @@
+{
+  "name": "@project12/worker",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "tsx src/worker.ts", "build": "tsc --noEmit" }
+}

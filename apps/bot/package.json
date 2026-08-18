@@ -1,0 +1,6 @@
+{
+  "name": "@project12/bot",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "tsx src/bot.ts", "build": "tsc --noEmit" }
+}

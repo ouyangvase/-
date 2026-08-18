@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: project12
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data", "./infra/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d project12"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    build: { context: ., dockerfile: infra/docker/api.Dockerfile }
+    environment:
+      APP_MODE: demo
+      REAL_MONEY_ENABLED: "false"
+      TOP_UP_ENABLED: "false"
+      WITHDRAWAL_ENABLED: "false"
+      CASH_REWARD_ENABLED: "false"
+      PACKET_PROVIDER: demo
+      TNG_INTEGRATION: disabled
+      PAYMENT_PROVIDER: disabled
+      TELEGRAM_MOCK_ENABLED: "true"
+      DATABASE_URL: postgresql://demo:demo@postgres:5432/project12
+      REDIS_URL: redis://redis:6379
+      API_PORT: 8787
+    ports: ["8787:8787"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+  miniapp:
+    build: { context: ., dockerfile: infra/docker/miniapp.Dockerfile }
+    environment: { APP_NAME: Project 12 Demo }
+    ports: ["4173:4173"]
+    depends_on: [api]
+  admin:
+    build: { context: ., dockerfile: infra/docker/admin.Dockerfile }
+    environment: { APP_NAME: Project 12 Admin }
+    ports: ["4174:4174"]
+    depends_on: [api]
+  worker:
+    build: { context: ., dockerfile: infra/docker/worker.Dockerfile }
+    environment: { APP_MODE: demo }
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+  bot:
+    build: { context: ., dockerfile: infra/docker/bot.Dockerfile }
+    environment:
+      APP_MODE: demo
+      TELEGRAM_MOCK_ENABLED: "true"
+      MINIAPP_ORIGIN: http://miniapp:4173
+      API_ORIGIN: http://api:8787
+    depends_on: [api, miniapp]
+volumes:
+  pgdata:

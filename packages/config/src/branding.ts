@@ -1,0 +1,32 @@
+export const branding = {
+  appName: "PROJECT 12",
+  shortName: "P12",
+  gameName: "12牛牛",
+  botDisplayName: "PROJECT 12 娱乐城",
+  mascotName: "Niu",
+  supportUsername: "",
+  announcementChannel: "",
+  tagline: "Clean play. Clear records.",
+  demoLabel: "DEMO CREDIT · NO CASH VALUE",
+  palette: {
+    appBg: "#0b0c10",
+    appBgElevated: "#111218",
+    surfacePrimary: "rgba(29, 30, 37, 0.82)",
+    surfaceSecondary: "#1c1d23",
+    surfaceRaised: "#25262d",
+    surfaceSelected: "rgba(10, 132, 255, 0.14)",
+    textPrimary: "#f5f5f7",
+    textSecondary: "rgba(235, 235, 245, 0.72)",
+    textTertiary: "rgba(235, 235, 245, 0.46)",
+    divider: "rgba(255, 255, 255, 0.10)",
+    strokeStrong: "rgba(255, 255, 255, 0.16)",
+    accent: "#0a84ff",
+    accentPressed: "#0071e3",
+    success: "#30d158",
+    warning: "#ff9f0a",
+    danger: "#ff453a",
+    gameGold: "#e6b84a",
+    gameGoldLight: "#ffe08a",
+    gameGoldDark: "#8d6422"
+  }
+} as const;

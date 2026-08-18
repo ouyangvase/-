@@ -1,0 +1,7 @@
+{
+  "name": "@project12/api",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "tsx watch src/server.ts", "build": "tsc --noEmit" },
+  "dependencies": { "@project12/contracts": "workspace:*", "@project12/game-engine": "workspace:*", "@project12/ledger": "workspace:*", "@project12/telegram": "workspace:*" }
+}

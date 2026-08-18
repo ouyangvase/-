@@ -1,0 +1,6 @@
+{
+  "name": "@project12/ledger",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" }
+}
