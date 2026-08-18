@@ -12,6 +12,11 @@ Date: 2026-08-19
 - Telegram `/start`, `ref_<code>` deep links, reply keyboard, Menu Button/Main Mini App payloads, commands, notifications and webhook-secret validation are implemented as a safe adapter. Actual delivery remains opt-in and token-gated.
 - Auth verifies signed Telegram `initData` outside demo mode, issues an expiring `HttpOnly` cookie, and does not persist a session token in browser storage.
 - Postgres schema, forward migration, seed, outbox, SSE round snapshot, worker lock, admin risk/recovery/adjustment endpoints and seven-service Compose topology are present. Seed covers 20 demo users, two rooms, 30 historical rounds, four campaigns, three referral levels and eight banners.
+- `.env.example` documents the local demo defaults, Telegram boundary variables and production safety switches.
+
+## Implementation boundary
+
+The runnable workspace uses the existing Vite + React + handwritten Node/SQL shell so the Mini App, API, Admin, Worker and Bot can be verified locally without an external platform account. The domain contracts and database model are kept framework-neutral; a production migration to Next.js/Tailwind/Radix/Drizzle/Zod remains a separate delivery decision, not an unverified claim in this demo.
 
 ## Verification evidence
 
