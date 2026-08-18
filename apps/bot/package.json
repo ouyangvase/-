@@ -2,5 +2,7 @@
   "name": "@project12/bot",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "tsx src/bot.ts", "build": "tsc --noEmit" }
+  "exports": { ".": "./src/bot.ts" },
+  "scripts": { "dev": "tsx src/bot.ts", "start": "tsx src/bot.ts", "build": "tsc --noEmit" },
+  "dependencies": { "@project12/telegram": "workspace:*" }
 }

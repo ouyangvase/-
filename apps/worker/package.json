@@ -2,5 +2,6 @@
   "name": "@project12/worker",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "tsx src/worker.ts", "build": "tsc --noEmit" }
+  "scripts": { "dev": "tsx src/worker.ts", "start": "tsx src/worker.ts", "build": "tsc --noEmit" },
+  "dependencies": { "@project12/bot": "workspace:*", "@project12/database": "workspace:*" }
 }

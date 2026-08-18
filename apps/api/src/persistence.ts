@@ -7,6 +7,7 @@ const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 
 type AuditInput = { actor: string; action: string; referenceType: string; referenceId: string; before?: unknown; after?: unknown };
 type RoundEventInput = { roundId: string; from?: RoundState; to: RoundState; payload: Record<string, unknown>; actor: string };
+type WorkerHeartbeat = { workerId: string; status: string; heartbeatAt: string };
 
 export class ApiPersistence {
   private readonly database: Project12Database;
@@ -55,6 +56,49 @@ export class ApiPersistence {
 
   async createSession(telegramUserId: string, token: string, expiresAt: Date): Promise<void> {
     await this.run(() => this.database.query("INSERT INTO user_sessions (user_id, session_hash, expires_at) SELECT user_id, $2, $3 FROM telegram_identities WHERE telegram_user_id = $1 ON CONFLICT (session_hash) DO NOTHING", [telegramUserId, createHash("sha256").update(token).digest("hex"), expiresAt]).then(() => undefined));
+  }
+
+  async findSession(token: string): Promise<{ userId: string; role: "PLAYER" | "ADMIN"; expiresAt: Date } | undefined> {
+    const sessionHash = createHash("sha256").update(token).digest("hex");
+    const rows = await this.run(() => this.database.query<{ user_id: string; role: "PLAYER" | "ADMIN"; expires_at: Date }>("SELECT us.user_id, u.role, us.expires_at FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.session_hash = $1 AND us.revoked_at IS NULL AND us.expires_at > now()", [sessionHash]));
+    const row = rows?.[0];
+    return row ? { userId: row.user_id, role: row.role === "ADMIN" ? "ADMIN" : "PLAYER", expiresAt: row.expires_at } : undefined;
+  }
+
+  async recordTelegramUpdate(updateId: number, updateType: string, payload: unknown): Promise<boolean> {
+    if (!this.configured) {
+      if (this.strict) throw new Error("DATABASE_REQUIRED: Telegram updates require persistent storage");
+      return true;
+    }
+    const rows = await this.database.query<{ update_id: number }>("INSERT INTO telegram_updates (update_id, update_type, payload) VALUES ($1, $2, $3::jsonb) ON CONFLICT (update_id) DO NOTHING RETURNING update_id", [updateId, updateType, JSON.stringify(payload)]);
+    return Boolean(rows[0]);
+  }
+
+  async enqueueTelegramUpdate(updateId: number, updateType: string, payload: unknown): Promise<boolean> {
+    if (!this.configured) {
+      if (this.strict) throw new Error("DATABASE_REQUIRED: Telegram updates require persistent storage");
+      return true;
+    }
+    return this.database.transaction(async (client) => {
+      const inserted = await client.query<{ update_id: number }>("INSERT INTO telegram_updates (update_id, update_type, payload) VALUES ($1, $2, $3::jsonb) ON CONFLICT (update_id) DO NOTHING RETURNING update_id", [updateId, updateType, JSON.stringify(payload)]);
+      if (!inserted.rows[0]) return false;
+      await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["TELEGRAM_UPDATE_RECEIVED", JSON.stringify({ updateId, updateType, update: payload })]);
+      return true;
+    });
+  }
+
+  async persistWorkerHeartbeat(workerId: string, status = "healthy"): Promise<void> {
+    if (!this.configured) {
+      if (this.strict) throw new Error("DATABASE_REQUIRED: Worker heartbeat requires persistent storage");
+      return;
+    }
+    await this.database.query("INSERT INTO worker_heartbeats (worker_id, status, heartbeat_at) VALUES ($1, $2, now()) ON CONFLICT (worker_id) DO UPDATE SET status = EXCLUDED.status, heartbeat_at = now()", [workerId, status]);
+  }
+
+  async latestWorkerHeartbeat(): Promise<WorkerHeartbeat | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<WorkerHeartbeat>("SELECT worker_id AS \"workerId\", status, heartbeat_at AS \"heartbeatAt\" FROM worker_heartbeats ORDER BY heartbeat_at DESC LIMIT 1");
+    return rows[0];
   }
 
   async persistDevice(telegramUserId: string, publicKey: string): Promise<void> {

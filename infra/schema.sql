@@ -184,7 +184,16 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   key text PRIMARY KEY, actor text NOT NULL, result jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS outbox_events (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_type text NOT NULL, payload jsonb NOT NULL, published_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_type text NOT NULL, payload jsonb NOT NULL, published_at timestamptz,
+  claimed_at timestamptz, claimed_by text, attempt_count int NOT NULL DEFAULT 0, last_error text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS telegram_updates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), update_id bigint NOT NULL UNIQUE, update_type text NOT NULL,
+  payload jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  worker_id text PRIMARY KEY, status text NOT NULL, heartbeat_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor text NOT NULL, action text NOT NULL, reference_type text NOT NULL, reference_id text NOT NULL,
@@ -198,3 +207,5 @@ CREATE INDEX IF NOT EXISTS idx_round_events_round_created ON round_events(round_
 CREATE INDEX IF NOT EXISTS idx_audit_logs_reference ON audit_logs(reference_type, reference_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_risk_flags_status ON risk_flags(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON outbox_events(created_at) WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_telegram_updates_received ON telegram_updates(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_recent ON worker_heartbeats(heartbeat_at DESC);

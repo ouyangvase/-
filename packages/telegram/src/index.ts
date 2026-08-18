@@ -1,17 +1,24 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
+export function safeEqualText(expected: string, received: string | undefined): boolean {
+  if (!received) return false;
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(received);
+  return expectedBytes.length === receivedBytes.length && timingSafeEqual(expectedBytes, receivedBytes);
+}
+
 export function validateTelegramInitData(initData: string, botToken: string, maxAgeSeconds = 86400): { userId: string; username?: string } {
   if (!initData || !botToken) throw new Error("Telegram initData and Bot token are required");
   const params = new URLSearchParams(initData);
   const receivedHash = params.get("hash");
   const authDate = Number(params.get("auth_date"));
   const age = Math.floor(Date.now() / 1000) - authDate;
-  if (!receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
+  if (!params.get("query_id") || !receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
   params.delete("hash");
   const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
   const secret = createHash("sha256").update(botToken).digest();
   const calculated = createHmac("sha256", secret).update(dataCheckString).digest("hex");
-  if (calculated.length !== receivedHash.length || !timingSafeEqual(Buffer.from(calculated), Buffer.from(receivedHash))) throw new Error("Telegram initData signature mismatch");
+  if (!safeEqualText(calculated, receivedHash)) throw new Error("Telegram initData signature mismatch");
   const user = JSON.parse(params.get("user") ?? "{}");
   if (!user.id) throw new Error("Telegram user identity missing");
   return { userId: String(user.id), username: user.username };

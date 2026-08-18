@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash, randomBytes } from "node:crypto";
 import { assertTransition, classifyHand, demoRules, hashSeed, settlePlayer } from "@project12/game-engine";
 import { applyJournal, assertBalanced, createTransferJournal, type Journal, type LedgerAccount } from "@project12/ledger";
-import { validateTelegramInitData } from "@project12/telegram";
+import { safeEqualText, validateTelegramInitData } from "@project12/telegram";
 import type { DemoState, RoundState } from "@project12/contracts";
 import { createPacketProvider, PacketProviderError } from "./providers/packet-provider";
 import { ApiPersistence } from "./persistence";
@@ -25,6 +25,7 @@ const deviceBindings = new Map<string, { userId: string; publicKey: string; fing
 const securityPins = new Map<string, { hash: string; changedAt: string }>();
 const onboarding = new Map<string, { deviceBound: boolean; referrerBound: boolean; pinSet: boolean; pendingReferral?: string }>();
 const outboxEvents: Array<{ id: string; type: string; payload: Record<string, unknown>; createdAt: string; publishedAt?: string }> = [];
+const webhookUpdateIds = new Set<number>();
 const packetIds = new Map<string, string>();
 const riskFlags: Array<{ id: string; userId?: string; roundId?: string; status: "OPEN" | "REVIEW" | "HELD" | "CLOSED"; reason: string; createdAt: string }> = [
   { id: "RF-019", userId: "demo-player-03", status: "REVIEW", reason: "Repeated referral pairing", createdAt: now() },
@@ -93,12 +94,30 @@ function rejectMoney(response: ServerResponse) { return json(response, 403, { co
 function requirePlayer(request: IncomingMessage, response: ServerResponse): { userId: string; role: "PLAYER" | "ADMIN" } | undefined { const identity = session(request); if (!identity) { json(response, 401, { error: "Unauthorized" }); return undefined; } return identity; }
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
 
+async function workerHealth(): Promise<{ status: "healthy" | "mock" | "unavailable"; workerId?: string; heartbeatAt?: string }> {
+  if (appMode === "demo" && !persistence.configured) return { status: "mock" };
+  const heartbeat = await persistence.latestWorkerHeartbeat();
+  if (!heartbeat) return { status: "unavailable" };
+  const age = Date.now() - Date.parse(heartbeat.heartbeatAt);
+  return age <= Number(process.env.WORKER_HEARTBEAT_TIMEOUT_MS ?? 45_000) ? { status: "healthy", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt } : { status: "unavailable", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt };
+}
+
+function telegramUpdateType(update: Record<string, unknown>): "message" | "callback_query" | "my_chat_member" | "unknown" {
+  if (update.message) return "message";
+  if (update.callback_query) return "callback_query";
+  if (update.my_chat_member) return "my_chat_member";
+  return "unknown";
+}
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    response.setHeader("x-request-id", header(request, "x-request-id") ?? randomBytes(12).toString("hex"));
     if (request.method === "OPTIONS") return json(response, 204, {});
     if (request.method === "POST" && !allowRateLimit(request)) return json(response, 429, { error: "Rate limit exceeded" });
-    if (request.method === "GET" && url.pathname === "/health") { const databaseHealth = await persistence.health(); const ready = appMode === "staging" ? databaseHealth === "healthy" : true; return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, services: { api: ready ? "healthy" : "degraded", worker: "mock-heartbeat", bot: "webhook-or-mock", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
+    if (request.method === "GET" && url.pathname === "/health/live") return json(response, 200, { ok: true, service: "api", mode: appMode });
+    if (request.method === "GET" && url.pathname === "/health/worker") { const worker = await workerHealth(); return json(response, worker.status === "unavailable" ? 503 : 200, { ok: worker.status !== "unavailable", service: "worker", ...worker }); }
+    if (request.method === "GET" && (url.pathname === "/health/ready" || url.pathname === "/health")) { const databaseHealth = await persistence.health(); const worker = await workerHealth(); const ready = appMode === "demo" ? true : databaseHealth === "healthy" && worker.status === "healthy"; return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, services: { api: ready ? "healthy" : "degraded", worker: worker.status, bot: process.env.TELEGRAM_BOT_TOKEN ? "configured" : "blocked", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
 
     if (request.method === "POST" && url.pathname === "/api/auth/telegram") { const data = await body(request); let identity: { userId: string; username?: string }; let mode: "telegram-verified" | "mock"; if (process.env.TELEGRAM_BOT_TOKEN && typeof data.initData === "string" && data.initData.trim()) { identity = validateTelegramInitData(data.initData, process.env.TELEGRAM_BOT_TOKEN, Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS ?? 86400)); mode = "telegram-verified"; } else if (telegramMockEnabled) { identity = { userId: typeof data.demoUser === "string" ? data.demoUser : "demo-player-01", username: "demo_player" }; mode = "mock"; } else return json(response, 503, { code: "TELEGRAM_SIGNED_INIT_DATA_REQUIRED", error: "Signed Telegram initData is required outside demo mode" }); const token = randomBytes(32).toString("hex"); const expiresAt = Date.now() + 86_400_000; sessions.set(token, { userId: identity.userId, role: "PLAYER", expiresAt }); await persistence.upsertTelegramIdentity(identity.userId, identity.username, mode === "telegram-verified"); await persistence.createSession(identity.userId, token, new Date(expiresAt)); const startParam = typeof data.startParam === "string" ? data.startParam.trim() : ""; const pendingReferral = startParam.replace(/^ref_/, ""); const onboardingEntry = onboardingState(identity.userId); if (pendingReferral) onboardingEntry.pendingReferral = pendingReferral; const secureSession = appMode !== "demo" || process.env.NODE_ENV === "production"; response.setHeader("set-cookie", `p12_session=${token}; HttpOnly; SameSite=${secureSession ? "None" : "Lax"}; Path=/; Max-Age=86400${secureSession ? "; Secure" : ""}`); return json(response, 200, { token: appMode === "demo" ? token : undefined, mode, user: { id: identity.userId, username: identity.username }, startParam, session: "HttpOnly cookie", persistence: persistence.configured ? "postgres" : "memory-demo-fallback" }); }
     if (request.method === "GET" && url.pathname === "/api/me") return session(request) ? json(response, 200, state.user) : json(response, 401, { error: "Unauthorized" });
@@ -146,7 +165,24 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/admin/campaigns") return requireAdmin(request) ? writeIdempotent(request, response, (key) => { const result = { id: "campaign-draft-demo", status: "DRAFT", idempotencyKey: key }; audit("admin", "CAMPAIGN_DRAFT_CREATED", "CAMPAIGN", result.id, undefined, result); return result; }) : json(response, 403, { error: "Admin authorization required" });
     if (request.method === "POST" && url.pathname.startsWith("/api/admin/disputes/") && url.pathname.endsWith("/resolve")) return requireAdmin(request) ? writeIdempotent(request, response, (key) => { const id = url.pathname.split("/")[4]; const result = { id, status: "RESOLVED", auditRequired: true, idempotencyKey: key }; audit("admin", "DISPUTE_RESOLVED", "DISPUTE", id, { status: "OPEN" }, result); return result; }) : json(response, 403, { error: "Admin authorization required" });
     if (request.method === "POST" && url.pathname === `/api/admin/rounds/${state.round.id}/transition`) return requireAdmin(request) ? writeIdempotent(request, response, async (key) => { const data = await body(request); const to = data.to as RoundState; if (!to) throw new Error("Target state is required"); const event = transition(to, "admin", { idempotencyKey: key, reason: "operator demo transition" }); return { event, state: state.round.state }; }) : json(response, 403, { error: "Admin authorization required" });
-    if (request.method === "POST" && url.pathname === "/api/telegram/webhook") { const expected = process.env.TELEGRAM_WEBHOOK_SECRET; const received = header(request, "x-telegram-bot-api-secret-token"); if (appMode !== "demo" && !expected) return json(response, 503, { code: "WEBHOOK_SECRET_REQUIRED", error: "Telegram webhook secret is not configured" }); if (expected && received !== expected) return json(response, 401, { code: "AUTHORIZATION_REQUIRED", error: "Telegram webhook secret mismatch" }); return json(response, 200, { status: "MOCK_ONLY", message: "Webhook accepted only as a non-financial demo stub." }); }
+    if (request.method === "POST" && url.pathname === "/api/telegram/webhook") {
+      const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+      const received = header(request, "x-telegram-bot-api-secret-token");
+      if (appMode !== "demo" && !expected) return json(response, 503, { code: "WEBHOOK_SECRET_REQUIRED", error: "Telegram webhook secret is not configured" });
+      if (expected && !safeEqualText(expected, received)) return json(response, 401, { code: "AUTHORIZATION_REQUIRED", error: "Telegram webhook secret mismatch" });
+      if (appMode !== "demo" && !persistence.configured) return json(response, 503, { code: "DATABASE_REQUIRED", error: "Persistent webhook storage is not configured" });
+      const update = await body(request);
+      const updateId = Number(update.update_id);
+      const updateType = telegramUpdateType(update);
+      if (!Number.isSafeInteger(updateId) || updateId < 0) return json(response, 400, { code: "INVALID_TELEGRAM_UPDATE", error: "Telegram update_id is required" });
+      if (updateType === "unknown") return json(response, 400, { code: "UNSUPPORTED_TELEGRAM_UPDATE", error: "Supported Telegram update payload is required" });
+      if (webhookUpdateIds.has(updateId)) return json(response, 200, { ok: true, duplicate: true, updateId });
+      const inserted = await persistence.enqueueTelegramUpdate(updateId, updateType, update);
+      if (!inserted) return json(response, 200, { ok: true, duplicate: true, updateId });
+      webhookUpdateIds.add(updateId);
+      outboxEvents.unshift({ id: `TG-${updateId}`, type: "TELEGRAM_UPDATE_RECEIVED", payload: { updateId, updateType }, createdAt: now() });
+      return json(response, 200, { ok: true, accepted: true, updateId, updateType });
+    }
     return json(response, 404, { error: "Not found" });
   } catch (error) { if (error instanceof PacketProviderError) return json(response, error.code === "AUTHORIZATION_REQUIRED" ? 401 : 503, { code: error.code, error: error.message }); return json(response, 400, { error: error instanceof Error ? error.message : "Request failed" }); }
 });

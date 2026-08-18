@@ -72,7 +72,11 @@ importers:
         specifier: 8.13.1
         version: 8.13.1
 
-  apps/bot: {}
+  apps/bot:
+    dependencies:
+      '@project12/telegram':
+        specifier: workspace:*
+        version: link:../../packages/telegram
 
   apps/miniapp:
     dependencies:
@@ -95,7 +99,14 @@ importers:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@project12/bot':
+        specifier: workspace:*
+        version: link:../bot
+      '@project12/database':
+        specifier: workspace:*
+        version: link:../../packages/database
 
   packages/config: {}
 

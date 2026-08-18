@@ -1,6 +1,15 @@
+import { randomBytes } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
+import { Project12Database, type QueryExecutor } from "@project12/database";
+
 type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "PACKET_SENT" | "CLAIMING" | "EVALUATING" | "SETTLING" | "ROUND_COMPLETE" | "ROUND_CANCELLED" | "REFUNDING" | "REFUNDED" | "DISPUTED";
 
-const intervalMs = Number(process.env.WORKER_INTERVAL_MS ?? 1000);
+const pollIntervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 1000);
+const heartbeatIntervalMs = Number(process.env.WORKER_HEARTBEAT_INTERVAL_MS ?? 15_000);
+const appMode = process.env.APP_MODE ?? "demo";
+const database = new Project12Database();
+const workerId = `${process.env.HOSTNAME ?? "local"}-${randomBytes(6).toString("hex")}`;
 const locks = new Set<string>();
 const demoRounds = new Map<string, DemoRoundState>([["R-0247", "BETTING"]]);
 
@@ -29,5 +38,63 @@ export function advanceDemoRound(roundId: string, target: DemoRoundState): DemoR
   });
 }
 
-console.log(`PROJECT 12 demo worker ready; state transitions use a single-flight advisory lock (interval ${intervalMs}ms).`);
-setInterval(() => console.log(JSON.stringify({ service: "worker", mode: "demo", action: "heartbeat", activeRounds: demoRounds.size, at: new Date().toISOString() })), intervalMs);
+type OutboxRow = { id: string; event_type: string; payload: Record<string, unknown> };
+
+async function claimDatabaseOutbox(limit = 50): Promise<OutboxRow[]> {
+  if (!database.configured) return [];
+  return database.transaction(async (client: QueryExecutor) => {
+    const rows = await client.query<OutboxRow>("SELECT id, event_type, payload FROM outbox_events WHERE published_at IS NULL AND (claimed_at IS NULL OR claimed_at < now() - interval '60 seconds') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1", [limit]);
+    for (const row of rows.rows) await client.query("UPDATE outbox_events SET claimed_at = now(), claimed_by = $2, attempt_count = attempt_count + 1 WHERE id = $1", [row.id, workerId]);
+    return rows.rows;
+  });
+}
+
+async function publishDatabaseOutbox(row: OutboxRow): Promise<void> {
+  if (row.event_type === "TELEGRAM_UPDATE_RECEIVED") {
+    const update = row.payload.update as TelegramUpdate | undefined;
+    const response = update ? handleTelegramUpdate(update) : null;
+    if (response) {
+      if (!process.env.TELEGRAM_BOT_TOKEN) {
+        if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
+      } else {
+        await sendBotApi("sendMessage", response as unknown as Record<string, unknown>);
+      }
+    }
+  }
+  await database.query("UPDATE outbox_events SET published_at = now(), claimed_at = NULL, claimed_by = NULL, last_error = NULL WHERE id = $1", [row.id]);
+}
+
+async function failDatabaseOutbox(row: OutboxRow, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : "Worker outbox delivery failed";
+  await database.query("UPDATE outbox_events SET claimed_at = NULL, claimed_by = NULL, last_error = $2 WHERE id = $1", [row.id, message.slice(0, 500)]);
+}
+
+async function writeHeartbeat(): Promise<void> {
+  if (!database.configured) {
+    if (appMode !== "demo") throw new Error("DATABASE_REQUIRED: Worker heartbeat requires persistent storage");
+    return;
+  }
+  await database.query("INSERT INTO worker_heartbeats (worker_id, status, heartbeat_at) VALUES ($1, 'healthy', now()) ON CONFLICT (worker_id) DO UPDATE SET status = 'healthy', heartbeat_at = now()", [workerId]);
+}
+
+async function pollOutbox(): Promise<void> {
+  for (const row of await claimDatabaseOutbox()) {
+    try { await publishDatabaseOutbox(row); }
+    catch (error) { await failDatabaseOutbox(row, error); console.error(JSON.stringify({ service: "worker", action: "outbox_delivery_failed", outbox_id: row.id, error: error instanceof Error ? error.message : "unknown" })); }
+  }
+}
+
+export async function startWorker(): Promise<void> {
+  if (appMode !== "demo" && !database.configured) throw new Error("DATABASE_REQUIRED: Worker cannot start outside demo without DATABASE_URL");
+  await writeHeartbeat();
+  console.log(JSON.stringify({ service: "worker", mode: appMode, status: database.configured ? "ready" : "MOCK_ONLY", worker_id: workerId }));
+  const heartbeatTimer = setInterval(() => { void writeHeartbeat().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "heartbeat_failed", error: error instanceof Error ? error.message : "unknown" }))); }, heartbeatIntervalMs);
+  const pollTimer = setInterval(() => { void pollOutbox().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
+  const stop = () => { clearInterval(heartbeatTimer); clearInterval(pollTimer); void database.close(); };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void startWorker().catch((error: unknown) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
+}
