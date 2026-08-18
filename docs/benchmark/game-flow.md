@@ -12,6 +12,6 @@ It also describes cancellation/refund branches for no banker, no bets and invali
 
 The safe demo exposes the simplified, server-owned path:
 
-`BETTING → CLAIMING → RESOLVING → SETTLED`
+`LOBBY → BANKER_BIDDING → BETTING → PACKET_SENT → CLAIMING → EVALUATING → SETTLING → ROUND_COMPLETE`
 
 The frontend countdown is presentation only. Every write carries an idempotency key; the API applies a balanced journal for bet lock and settlement. This is a testable simulation and not a live TNG result pipeline.

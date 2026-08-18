@@ -20,8 +20,8 @@
   --danger: #ff453a;
   --gold: #e6b84a;
   --gold-light: #ffe08a;
-  --safe-top: max(12px, var(--tg-content-safe-top, env(safe-area-inset-top)));
-  --safe-bottom: max(16px, var(--tg-content-safe-bottom, env(safe-area-inset-bottom)));
+  --safe-top: max(12px, var(--tg-content-safe-area-inset-top, var(--tg-content-safe-top, env(safe-area-inset-top))));
+  --safe-bottom: max(16px, var(--tg-content-safe-area-inset-bottom, var(--tg-content-safe-bottom, env(safe-area-inset-bottom))));
 }
 
 * { box-sizing: border-box; }
@@ -54,6 +54,8 @@ h2 { font-size: 21px; line-height: 1.25; letter-spacing: -.02em; }
 .pin-input { letter-spacing: .32em; font-variant-numeric: tabular-nums; }
 .helper-copy { margin-top: 10px; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 .form-error { margin-top: 10px; color: #ff8178; font-size: 13px; line-height: 1.45; }
+.offline-banner { margin-top: 18px; padding: 11px 12px; border: 1px solid rgba(255,159,10,.34); border-radius: 14px; color: #ffd18a; background: rgba(255,159,10,.09); font-size: 12px; line-height: 1.45; }
+.loading-banner { margin-top: 18px; padding: 11px 12px; border: 1px solid rgba(10,132,255,.34); border-radius: 14px; color: #9dceff; background: rgba(10,132,255,.09); font-size: 12px; line-height: 1.45; }
 .primary-button, .secondary-button, .bet-chip, .back-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: 14px; font-weight: 700; transition: background 180ms ease, border-color 180ms ease, transform 140ms ease, opacity 180ms ease; }
 .primary-button { padding: 0 16px; border: 1px solid transparent; color: #fff; background: var(--accent); }
 .primary-button:hover { background: var(--accent-pressed); }
@@ -72,6 +74,22 @@ h2 { font-size: 21px; line-height: 1.25; letter-spacing: -.02em; }
 .demo-pill { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; margin-bottom: 20px; padding: 0 11px; border: 1px solid var(--divider); border-radius: 999px; color: var(--text-tertiary); font-size: 10px; letter-spacing: .08em; }
 .dot, .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px rgba(48,209,88,.12); }
 .screen { display: grid; gap: 18px; padding-bottom: 4px; }
+.state-rail { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
+.state-rail::-webkit-scrollbar { display: none; }
+.state-rail span { flex: 0 0 auto; padding: 6px 8px; border: 1px solid var(--divider); border-radius: 999px; color: var(--text-tertiary); background: rgba(255,255,255,.025); font-size: 10px; white-space: nowrap; }
+.state-rail span.active { border-color: rgba(10,132,255,.6); color: #fff; background: rgba(10,132,255,.18); }
+.state-rail span.done { border-color: rgba(48,209,88,.36); color: var(--success); }
+.outcome-switcher { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 14px; }
+.outcome-switcher button { min-height: 32px; border: 1px solid var(--divider); border-radius: 10px; color: var(--text-tertiary); background: rgba(255,255,255,.04); font-size: 10px; font-weight: 750; }
+.outcome-switcher button.active { border-color: var(--accent); color: #fff; background: rgba(10,132,255,.18); }
+.outcome-card { display: grid; gap: 4px; margin-top: 12px; padding: 13px 14px; border: 1px solid var(--divider); border-radius: 16px; background: rgba(255,255,255,.04); }
+.outcome-card strong { font-size: 13px; letter-spacing: .1em; }
+.outcome-card span { color: var(--text); font-weight: 700; }
+.outcome-card small { color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.outcome-win { border-color: rgba(48,209,88,.42); background: rgba(48,209,88,.08); }.outcome-win strong { color: var(--success); }
+.outcome-lose { border-color: rgba(255,69,58,.42); background: rgba(255,69,58,.08); }.outcome-lose strong { color: #ff8178; }
+.outcome-tie { border-color: rgba(10,132,255,.42); background: rgba(10,132,255,.08); }.outcome-tie strong { color: #70b7ff; }
+.outcome-watered { border-color: rgba(255,159,10,.42); background: rgba(255,159,10,.08); }.outcome-watered strong { color: #ffd18a; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .section-heading.compact { align-items: center; }
 .section-heading h2 { margin-top: 6px; }

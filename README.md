@@ -25,7 +25,7 @@ The UI uses a deterministic local demo fallback when the API is not running. The
 
 ## Safety boundary
 
-All credit is labeled `DEMO CREDIT / NO CASH VALUE`. The API rejects real-money operations, and only the `DemoPacketProvider` is enabled. `TngPacketProvider` is an explicit `UNIMPLEMENTED` status. Keep `REAL_MONEY_ENABLED=false`, `TOP_UP_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, `CASH_REWARD_ENABLED=false`, `PACKET_PROVIDER=demo` and `TELEGRAM_MOCK_ENABLED=true` for local testing.
+All credit is labeled `DEMO CREDIT / NO CASH VALUE`. The API rejects real-money operations, and only the `DemoPacketProvider` is enabled. `TngPacketProvider` is an explicit `PROVIDER_NOT_CONFIGURED` error path. Keep `REAL_MONEY_ENABLED=false`, `TOP_UP_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, `CASH_REWARD_ENABLED=false`, `PACKET_PROVIDER=demo` and `TELEGRAM_MOCK_ENABLED=true` for local testing.
 
 ## Verification
 

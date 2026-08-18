@@ -8,4 +8,4 @@
 - These preview artifacts were created before the final source-evidence/rule-version patch; the reproducible source of truth is the local repository and its passing build, not the protected preview URLs.
 - API, Worker, PostgreSQL and Redis were not deployed to a public host.
 
-Before a usable staging handoff: remove deployment protection or provide a user-authorized authenticated verification path, deploy the API/Worker and managed data services, set demo-only environment values, configure health checks, structured logs, backups, webhook secret and rate limits. Keep real-money flags false.
+The only external blocker is the authorized staging bundle: Bot token/webhook secret, HTTPS Mini App origin, hosting authorization and managed Postgres/Redis credentials. Once supplied, deploy API/Worker/data, remove preview protection or provide an authenticated verification path, set the demo-only environment values, and run the health/checklist gate. Keep real-money flags false.

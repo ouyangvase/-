@@ -8,6 +8,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "typecheck": "tsc -p apps/miniapp/tsconfig.json && tsc -p apps/admin/tsconfig.json && tsc -p apps/api/tsconfig.json && tsc -p apps/bot/tsconfig.json && tsc -p apps/worker/tsconfig.json",
+    "lint": "pnpm typecheck",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "demo:load": "tsx scripts/load-demo.ts"

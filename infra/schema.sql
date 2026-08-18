@@ -3,12 +3,19 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), internal_uid text NOT NULL UNIQUE DEFAULT ('P12-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12))),
   display_name text NOT NULL,
-  role text NOT NULL DEFAULT 'PLAYER' CHECK (role IN ('PLAYER', 'ADMIN', 'SUPPORT')),
+  role text NOT NULL DEFAULT 'PLAYER' CHECK (role IN ('PLAYER', 'ADMIN', 'SUPPORT', 'SUPER_ADMIN', 'OPERATIONS', 'FINANCE_VIEWER', 'RISK_REVIEWER', 'CAMPAIGN_MANAGER', 'READ_ONLY')),
   risk_status text NOT NULL DEFAULT 'CLEAR' CHECK (risk_status IN ('CLEAR', 'REVIEW', 'HELD', 'BANNED')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS admin_roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL UNIQUE, description text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_user_roles (
+  user_id uuid NOT NULL REFERENCES users(id), role_id uuid NOT NULL REFERENCES admin_roles(id), granted_by uuid REFERENCES users(id), granted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id, role_id)
 );
 CREATE TABLE IF NOT EXISTS telegram_identities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL UNIQUE REFERENCES users(id),
@@ -24,7 +31,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   expires_at timestamptz NOT NULL, revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS device_bindings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL UNIQUE REFERENCES users(id), device_fingerprint_hash text NOT NULL UNIQUE,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL UNIQUE REFERENCES users(id), device_public_key text NOT NULL UNIQUE, device_fingerprint_hash text UNIQUE,
   platform text NOT NULL DEFAULT 'telegram', bound_at timestamptz NOT NULL DEFAULT now(), unbound_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS device_sessions (
@@ -70,7 +77,7 @@ CREATE TABLE IF NOT EXISTS room_members (
 );
 CREATE TABLE IF NOT EXISTS rounds (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), room_id uuid NOT NULL REFERENCES game_rooms(id), rule_version_id uuid NOT NULL REFERENCES round_rule_versions(id),
-  state text NOT NULL CHECK (state IN ('DRAFT', 'BANKER_BIDDING', 'BANKER_CONFIRMED', 'BETTING', 'CLAIMING', 'RESOLVING', 'SETTLING', 'SETTLED', 'CANCELLED', 'REFUNDING', 'REFUNDED')),
+  state text NOT NULL CHECK (state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING', 'ROUND_COMPLETE', 'ROUND_CANCELLED', 'REFUNDING', 'REFUNDED', 'DISPUTED')),
   state_started_at timestamptz NOT NULL DEFAULT now(), state_ends_at timestamptz, state_version bigint NOT NULL DEFAULT 1, banker_user_id uuid REFERENCES users(id),
   server_seed_hash text, server_seed text, seed_revealed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -111,11 +118,11 @@ CREATE TABLE IF NOT EXISTS settlement_lines (
 );
 
 CREATE TABLE IF NOT EXISTS wallet_accounts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), account_type text NOT NULL CHECK (account_type IN ('USER_AVAILABLE', 'USER_LOCKED', 'BANKER_POOL', 'PLATFORM_FEE', 'DEMO_GRANTS')),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), account_type text NOT NULL CHECK (account_type IN ('USER_AVAILABLE', 'USER_LOCKED', 'USER_LOCKED_BANKER_POOL', 'BANKER_POOL', 'PLATFORM_FEE', 'DEMO_GRANTS', 'CAMPAIGN_REWARD_RESERVE', 'PENDING_ADJUSTMENT')),
   balance bigint NOT NULL DEFAULT 0 CHECK (balance >= 0), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id, account_type)
 );
 CREATE TABLE IF NOT EXISTS ledger_journals (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), reference_type text NOT NULL, reference_id text NOT NULL, idempotency_key text NOT NULL UNIQUE,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), reference_type text NOT NULL, reference_id text NOT NULL, idempotency_key text NOT NULL UNIQUE, provider_reference text UNIQUE,
   reason text NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS ledger_lines (
@@ -140,6 +147,14 @@ CREATE TABLE IF NOT EXISTS campaigns (
 CREATE TABLE IF NOT EXISTS campaign_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id uuid NOT NULL REFERENCES campaigns(id), version int NOT NULL, rules jsonb NOT NULL,
   starts_at timestamptz, ends_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(campaign_id, version)
+);
+CREATE TABLE IF NOT EXISTS campaign_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_version_id uuid NOT NULL REFERENCES campaign_versions(id), rule_key text NOT NULL, rule_value jsonb NOT NULL,
+  UNIQUE(campaign_version_id, rule_key)
+);
+CREATE TABLE IF NOT EXISTS campaign_rewards (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_version_id uuid NOT NULL REFERENCES campaign_versions(id), reward_key text NOT NULL, reward_points bigint NOT NULL CHECK (reward_points >= 0),
+  UNIQUE(campaign_version_id, reward_key)
 );
 CREATE TABLE IF NOT EXISTS campaign_progress (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_version_id uuid NOT NULL REFERENCES campaign_versions(id), user_id uuid NOT NULL REFERENCES users(id),

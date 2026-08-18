@@ -1,4 +1,4 @@
-export type LedgerAccount = "USER_AVAILABLE" | "USER_LOCKED" | "BANKER_POOL" | "PLATFORM_FEE" | "DEMO_GRANTS";
+export type LedgerAccount = "USER_AVAILABLE" | "USER_LOCKED" | "USER_LOCKED_BANKER_POOL" | "BANKER_POOL" | "PLATFORM_FEE" | "DEMO_GRANTS" | "CAMPAIGN_REWARD_RESERVE" | "PENDING_ADJUSTMENT";
 
 export interface LedgerLine { account: LedgerAccount; direction: "DEBIT" | "CREDIT"; amount: number; }
 export interface Journal { id: string; referenceType: string; referenceId: string; idempotencyKey: string; reason: string; lines: LedgerLine[]; }
