@@ -153,7 +153,9 @@ async function startBotService(): Promise<void> {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") return writeJson(response, 200, { ok: true, mode: process.env.APP_MODE ?? "demo", tokenConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN), webhookConfigured: Boolean(process.env.TELEGRAM_WEBHOOK_URL) });
       if (request.method === "POST" && url.pathname === "/telegram/webhook") {
-        if (secret && request.headers["x-telegram-bot-api-secret-token"] !== secret) return writeJson(response, 401, { error: "Webhook secret mismatch" });
+        const receivedSecret = request.headers["x-telegram-bot-api-secret-token"];
+        if ((process.env.APP_MODE ?? "demo") !== "demo" && !secret) return writeJson(response, 503, { code: "WEBHOOK_SECRET_REQUIRED", error: "Telegram webhook secret is not configured" });
+        if (secret && receivedSecret !== secret) return writeJson(response, 401, { error: "Webhook secret mismatch" });
         const result = await processUpdate(await readBody(request));
         return writeJson(response, 200, { ok: true, ...result });
       }
