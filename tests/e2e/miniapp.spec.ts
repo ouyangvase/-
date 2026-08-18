@@ -36,6 +36,7 @@ test("Telegram runtime cannot silently continue when the API is unavailable", as
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "SecureStorage" })).toBeVisible();
   await page.getByRole("button", { name: /绑定本设备/ }).click();
   await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
   await expect(page.getByRole("alert").filter({ hasText: "设备绑定失败" })).toBeVisible();

@@ -16,6 +16,8 @@ export interface TelegramWebAppLike {
   requestFullscreen?: () => void;
   exitFullscreen?: () => void;
   isVersionAtLeast?: (version: string) => boolean;
+  onEvent?: (event: "viewportChanged" | "themeChanged", callback: () => void) => void;
+  offEvent?: (event: "viewportChanged" | "themeChanged", callback: () => void) => void;
   setHeaderColor?: (color: string) => void;
   setBackgroundColor?: (color: string) => void;
   setBottomBarColor?: (color: string) => void;
@@ -58,10 +60,13 @@ export function applyTelegramTheme(webApp = getTelegramWebApp()): void {
   const theme = webApp.themeParams ?? {};
   const background = theme.bg_color ?? "#0b0c10";
   const header = theme.header_bg_color ?? background;
+  const bottomBar = theme.bottom_bar_bg_color ?? background;
   webApp.setHeaderColor?.(header);
   webApp.setBackgroundColor?.(background);
-  webApp.setBottomBarColor?.(theme.bottom_bar_bg_color ?? background);
+  webApp.setBottomBarColor?.(bottomBar);
   if (theme.bg_color) document.documentElement.style.setProperty("--tg-background", theme.bg_color);
+  document.documentElement.style.setProperty("--tg-header-background", header);
+  document.documentElement.style.setProperty("--tg-bottom-bar-background", bottomBar);
 }
 
 export function initTelegramBridge(options: { onBack?: () => void } = {}): TelegramWebAppLike | undefined {
@@ -73,7 +78,10 @@ export function initTelegramBridge(options: { onBack?: () => void } = {}): Teleg
   applyTelegramViewport(webApp);
   applyTelegramTheme(webApp);
   const onResize = () => applyTelegramViewport(webApp);
+  const onThemeChange = () => applyTelegramTheme(webApp);
   window.addEventListener("resize", onResize, { passive: true });
+  webApp.onEvent?.("viewportChanged", onResize);
+  webApp.onEvent?.("themeChanged", onThemeChange);
   if (options.onBack && webApp.BackButton) { webApp.BackButton.onClick(options.onBack); webApp.BackButton.show(); }
   return webApp;
 }
@@ -91,13 +99,13 @@ function secureStorage(): NonNullable<TelegramWebAppLike["SecureStorage"]> | und
 
 export function secureStorageGet(key: string): Promise<string | undefined> {
   const storage = secureStorage();
-  if (!storage) return Promise.resolve(localStorage.getItem(key) ?? undefined);
+  if (!storage) return Promise.resolve(undefined);
   return new Promise((resolve) => storage.getItem(key, (error, value) => resolve(error ? undefined : value)));
 }
 
 export function secureStorageSet(key: string, value: string): Promise<boolean> {
   const storage = secureStorage();
-  if (!storage) { localStorage.setItem(key, value); return Promise.resolve(true); }
+  if (!storage) return Promise.resolve(false);
   return new Promise((resolve) => storage.setItem(key, value, (error) => resolve(!error)));
 }
 
