@@ -1,5 +1,5 @@
 -- PROJECT 12 demo schema.
--- All wallet amounts are integer demo points. No table represents fiat or crypto money.
+-- Wallet amounts are demo points with up to two decimal places. No table represents fiat or crypto money.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS claim_records (
   claim_sequence bigint NOT NULL, demo_value bigint NOT NULL CHECK (demo_value >= 0), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(round_id, user_id, claim_sequence)
 );
 CREATE TABLE IF NOT EXISTS hands (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL REFERENCES rounds(id), user_id uuid NOT NULL REFERENCES users(id), points int NOT NULL CHECK (points BETWEEN 0 AND 9),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL REFERENCES rounds(id), user_id uuid NOT NULL REFERENCES users(id), points int NOT NULL CHECK (points BETWEEN 0 AND 10),
   hand_type text NOT NULL, cards jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(round_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS settlements (
@@ -114,12 +114,12 @@ CREATE TABLE IF NOT EXISTS settlements (
 );
 CREATE TABLE IF NOT EXISTS settlement_lines (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), settlement_id uuid NOT NULL REFERENCES settlements(id), account_type text NOT NULL,
-  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')), amount bigint NOT NULL CHECK (amount > 0), reason text NOT NULL
+  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')), amount numeric(20,2) NOT NULL CHECK (amount > 0), reason text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS wallet_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), account_type text NOT NULL CHECK (account_type IN ('USER_AVAILABLE', 'USER_LOCKED', 'USER_LOCKED_BANKER_POOL', 'BANKER_POOL', 'PLATFORM_FEE', 'DEMO_GRANTS', 'CAMPAIGN_REWARD_RESERVE', 'PENDING_ADJUSTMENT')),
-  balance bigint NOT NULL DEFAULT 0 CHECK (balance >= 0), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id, account_type)
+  balance numeric(20,2) NOT NULL DEFAULT 0 CHECK (balance >= 0), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id, account_type)
 );
 CREATE TABLE IF NOT EXISTS ledger_journals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), reference_type text NOT NULL, reference_id text NOT NULL, idempotency_key text NOT NULL UNIQUE, provider_reference text UNIQUE,
@@ -127,10 +127,10 @@ CREATE TABLE IF NOT EXISTS ledger_journals (
 );
 CREATE TABLE IF NOT EXISTS ledger_lines (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), journal_id uuid NOT NULL REFERENCES ledger_journals(id), account_id uuid NOT NULL REFERENCES wallet_accounts(id),
-  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')), amount bigint NOT NULL CHECK (amount > 0)
+  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')), amount numeric(20,2) NOT NULL CHECK (amount > 0)
 );
 CREATE TABLE IF NOT EXISTS balance_snapshots (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wallet_accounts(id), available bigint NOT NULL, locked bigint NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wallet_accounts(id), available numeric(20,2) NOT NULL, locked numeric(20,2) NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS announcements (

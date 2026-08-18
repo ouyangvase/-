@@ -5,6 +5,7 @@ import { demoBotResponse, validateTelegramInitData } from "@project12/telegram";
 describe("Telegram boundary", () => {
   it("keeps Bot integration mock-only without a token", () => expect(demoBotResponse().status).toBe("MOCK_ONLY"));
   it("rejects missing signed initData", () => expect(() => validateTelegramInitData("", "token")).toThrow());
+  it("rejects initData from too far in the future", () => expect(() => validateTelegramInitData(`auth_date=${Math.floor(Date.now() / 1000) + 120}&hash=ignored`, "token")).toThrow("expired"));
   it("accepts a fresh Telegram signature and returns the user identity", () => {
     const botToken = "test-token";
     const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: "AA-test", user: JSON.stringify({ id: 42, username: "p12" }) });

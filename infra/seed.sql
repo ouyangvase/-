@@ -1,5 +1,5 @@
 -- Deterministic demo seed. Safe to run repeatedly.
--- Every balance below is a demo point integer. It is never fiat, crypto, or a payment balance.
+-- Every balance below is a demo point amount. It is never fiat, crypto, or a payment balance.
 
 DO $$
 DECLARE

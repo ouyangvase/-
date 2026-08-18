@@ -44,9 +44,10 @@ export function buildMiniAppDeepLink(referralCode?: string): string {
   return `https://t.me/${botUsername}?startapp=${referralCode ? `ref_${encodeURIComponent(referralCode)}` : "hall"}`;
 }
 
-export function buildReplyKeyboard(): TelegramReplyMarkup {
+export function buildReplyKeyboard(startParam = ""): TelegramReplyMarkup {
+  const referral = startParam.startsWith("ref_") ? `${miniAppUrl}${miniAppUrl.includes("?") ? "&" : "?"}startapp=${encodeURIComponent(startParam)}` : miniAppUrl;
   return {
-    keyboard: [[{ text: "进入游戏大厅", web_app: { url: miniAppUrl } }]],
+    keyboard: [[{ text: "进入游戏大厅", web_app: { url: referral } }]],
     resize_keyboard: true,
     is_persistent: true
   };
@@ -61,11 +62,10 @@ export function buildMainMiniAppConfig(): MainMiniAppConfig {
 }
 
 export function buildWelcomeMessage(chatId: string | number, startParam = ""): BotMessage {
-  const suffix = startParam ? `\n\n邀请参数已记录：${startParam}` : "";
   return {
     chat_id: chatId,
-    text: `欢迎来到 PROJECT 12\n\n这里是 12牛牛的演示入口。先绑定设备并设置 6 位安全密码，再进入大厅。\n\n当前为 DEMO 模式，积分无现金价值。${suffix}`,
-    reply_markup: buildReplyKeyboard()
+    text: "欢迎来到 PROJECT 12\n\n点击下方按钮进入游戏大厅。",
+    reply_markup: buildReplyKeyboard(startParam)
   };
 }
 

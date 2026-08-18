@@ -2,7 +2,7 @@
 
 ## Current static staging
 
-- Mini App production alias: `https://project-12-demo-staging-public.vercel.app` (latest verified deployment `dpl_Gh7v1J7ZGQia3Y5C2WjdLF4KjV37`). Root, `/games/12/rules` and `/profile/referral` return HTTP 200; the served bundle includes the banker-bidding UI.
+- Mini App production alias: `https://project-12-demo-staging-public.vercel.app` (latest verified deployment `dpl_FhCdgdWRCSjMrEEvpdwyUnCQsoKY`). Root, `/games/12/rules` and `/profile/referral` return HTTP 200; the served bundle includes banker bidding, Telegram MainButton wiring and two-decimal settlement handling.
 - Admin production alias: `https://project-12-admin-staging.vercel.app` (latest verified deployment `dpl_7Lnk72hMmFaSpPwyVG1MZwxRGVV8`). Root and `/admin/rounds` return HTTP 200.
 - These are static front-end staging surfaces. The Mini App currently falls back to local Demo behavior because no public API origin was supplied; Admin API panels remain local-fallback until an API is reachable.
 - Vercel deployment protection may require `vercel curl` or an authorized browser session for deployment URLs; the public aliases returned HTTP 200 in direct verification.

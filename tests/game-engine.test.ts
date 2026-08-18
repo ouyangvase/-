@@ -45,6 +45,11 @@ describe("append-only demo ledger", () => {
     expect(() => assertBalanced(journal)).not.toThrow();
     expect(applyJournal({ USER_AVAILABLE: 500, USER_LOCKED: 0, USER_LOCKED_BANKER_POOL: 0, BANKER_POOL: 0, PLATFORM_FEE: 0, DEMO_GRANTS: 0, CAMPAIGN_REWARD_RESERVE: 0, PENDING_ADJUSTMENT: 0 }, journal)).toMatchObject({ USER_AVAILABLE: 250, USER_LOCKED: 250 });
   });
+  it("keeps two-decimal fee transfers balanced", () => {
+    const journal = createTransferJournal({ id: "J-DECIMAL", referenceType: "FEE", referenceId: "R-1", idempotencyKey: "K-DECIMAL", reason: "demo fee", from: "BANKER_POOL", to: "PLATFORM_FEE", amount: 0.5 });
+    expect(() => assertBalanced(journal)).not.toThrow();
+    expect(applyJournal({ USER_AVAILABLE: 0, USER_LOCKED: 0, USER_LOCKED_BANKER_POOL: 0, BANKER_POOL: 1, PLATFORM_FEE: 0, DEMO_GRANTS: 0, CAMPAIGN_REWARD_RESERVE: 0, PENDING_ADJUSTMENT: 0 }, journal)).toMatchObject({ BANKER_POOL: 0.5, PLATFORM_FEE: 0.5 });
+  });
   it("rejects a transfer that would create negative balance", () => {
     const journal = createTransferJournal({ id: "J-2", referenceType: "BET", referenceId: "R-1", idempotencyKey: "K-2", reason: "lock demo bet", from: "USER_AVAILABLE", to: "USER_LOCKED", amount: 250 });
     expect(() => applyJournal({ USER_AVAILABLE: 100, USER_LOCKED: 0, USER_LOCKED_BANKER_POOL: 0, BANKER_POOL: 0, PLATFORM_FEE: 0, DEMO_GRANTS: 0, CAMPAIGN_REWARD_RESERVE: 0, PENDING_ADJUSTMENT: 0 }, journal)).toThrow("negative balance");

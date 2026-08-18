@@ -1,6 +1,6 @@
 # Demo Rules
 
-- All balances are integer simulation points with no cash value.
+- All balances are simulation points with up to two decimal places and no cash value.
 - Point calculation follows the supplied rules-deck example: sum packet digits, take the last digit, and represent zero as 10 points.
 - The demo rule version is `demo-v1-source-confirmed-examples` and is immutable after round start.
 - Visible special-hand examples use the deck's categories and multipliers; ordinary hands use their points as the multiplier.

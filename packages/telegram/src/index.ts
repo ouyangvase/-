@@ -5,7 +5,8 @@ export function validateTelegramInitData(initData: string, botToken: string, max
   const params = new URLSearchParams(initData);
   const receivedHash = params.get("hash");
   const authDate = Number(params.get("auth_date"));
-  if (!receivedHash || !Number.isFinite(authDate) || Math.floor(Date.now() / 1000) - authDate > maxAgeSeconds) throw new Error("Invalid or expired Telegram initData");
+  const age = Math.floor(Date.now() / 1000) - authDate;
+  if (!receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
   params.delete("hash");
   const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
   const secret = createHash("sha256").update(botToken).digest();
