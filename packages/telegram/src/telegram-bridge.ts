@@ -86,6 +86,22 @@ export function initTelegramBridge(options: { onBack?: () => void } = {}): Teleg
   return webApp;
 }
 
+export function configureTelegramBackButton(options: { visible: boolean; onClick: () => void }): () => void {
+  const button = getTelegramWebApp()?.BackButton;
+  if (!button) return () => undefined;
+  button.offClick(options.onClick);
+  if (options.visible) {
+    button.onClick(options.onClick);
+    button.show();
+  } else {
+    button.hide();
+  }
+  return () => {
+    button.offClick(options.onClick);
+    button.hide();
+  };
+}
+
 export function openTelegramLink(url: string): void {
   const webApp = getTelegramWebApp();
   if (webApp && "openTelegramLink" in webApp && typeof (webApp as TelegramWebAppLike & { openTelegramLink?: (value: string) => void }).openTelegramLink === "function") {

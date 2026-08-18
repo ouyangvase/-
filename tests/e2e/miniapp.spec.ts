@@ -32,11 +32,12 @@ test("player can complete the safe demo round path", async ({ page }) => {
 
 test("Telegram runtime cannot silently continue when the API is unavailable", async ({ page }) => {
   await page.addInitScript(() => {
-    (window as unknown as { Telegram: { WebApp: { initData: string } } }).Telegram = { WebApp: { initData: "signed-init-data-placeholder" } };
+    (window as unknown as { Telegram: { WebApp: { initData: string; BackButton: { show: () => void; hide: () => void; onClick: () => void; offClick: () => void } } } }).Telegram = { WebApp: { initData: "signed-init-data-placeholder", BackButton: { show: () => undefined, hide: () => undefined, onClick: () => undefined, offClick: () => undefined } } };
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "SecureStorage" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
   await page.getByRole("button", { name: /绑定本设备/ }).click();
   await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
   await expect(page.getByRole("alert").filter({ hasText: "设备绑定失败" })).toBeVisible();

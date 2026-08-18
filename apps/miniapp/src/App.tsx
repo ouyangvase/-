@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { branding } from "@project12/config";
 import { demoPacketValue, hashSeed, settlePlayer } from "@project12/game-engine";
-import { configureTelegramButtons, getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection, initTelegramBridge, openTelegramLink, readTelegramInitData, readTelegramStartParam, secureStorageGet, secureStorageSet } from "@project12/telegram/bridge";
+import { configureTelegramBackButton, configureTelegramButtons, getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection, initTelegramBridge, openTelegramLink, readTelegramInitData, readTelegramStartParam, secureStorageGet, secureStorageSet } from "@project12/telegram/bridge";
 import type { DemoState } from "@project12/contracts";
 
 type TopTab = "hall" | "wallet" | "chat" | "profile";
@@ -39,7 +39,7 @@ function Icon({ name }: { name: "home" | "wallet" | "chat" | "user" | "cards" | 
 }
 
 function DemoPill() { return <span className="demo-pill"><span className="dot" />{branding.demoLabel}</span>; }
-function BackButton({ onClick }: { onClick: () => void }) { return <button className="back-button" onClick={onClick} aria-label="返回"><Icon name="back" />返回</button>; }
+function BackButton({ onClick }: { onClick: () => void }) { if (getTelegramWebApp()) return null; return <button className="back-button" onClick={onClick} aria-label="返回"><Icon name="back" />返回</button>; }
 function toBase64(buffer: ArrayBuffer): string { let binary = ""; for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte); return btoa(binary); }
 function screenFromPath(pathname: string): Screen { if (["/wallet", "/wallet/ledger", "/profile/funds"].includes(pathname)) return "wallet"; if (["/chat", "/chat/rooms", "/chat/support"].includes(pathname)) return "chat"; if (["/profile", "/profile/emotes", "/profile/settings", "/profile/security"].includes(pathname)) return "profile"; if (["/rules", "/games/12/rules"].includes(pathname)) return "rules"; if (pathname.startsWith("/game/") || pathname.startsWith("/games/12") || pathname.startsWith("/rooms/") || pathname.startsWith("/rounds/")) return "game"; if (["/missions", "/rewards", "/leaderboard"].includes(pathname)) return "missions"; if (["/referral", "/profile/referral"].includes(pathname)) return "referral"; return "hall"; }
 function pathForScreen(screen: Screen): string { return screen === "hall" ? "/hall" : screen === "game" ? "/game/R-0247" : `/${screen}`; }
@@ -67,7 +67,7 @@ export default function App() {
   const isTelegramRuntime = Boolean(getTelegramWebApp());
 
   useEffect(() => {
-    const webApp = initTelegramBridge({ onBack: () => setScreen("hall") });
+    const webApp = initTelegramBridge();
     const startParam = readTelegramStartParam() || new URLSearchParams(window.location.search).get("startapp") || new URLSearchParams(window.location.search).get("start") || "";
     if (startParam.startsWith("ref_")) setReferralInput(startParam.slice(4));
     const initData = readTelegramInitData();
@@ -77,6 +77,20 @@ export default function App() {
       .catch(() => setBootStatus(initData ? "error" : "offline"));
     if (webApp?.themeParams?.bg_color) document.documentElement.style.setProperty("--tg-background", webApp.themeParams.bg_color);
   }, []);
+
+  const topLevelScreen = ["hall", "wallet", "chat", "profile"].includes(screen);
+  useEffect(() => {
+    const visible = isTelegramRuntime && (onboarded ? !topLevelScreen : setupStep !== "device");
+    const onBack = () => {
+      if (!onboarded) {
+        if (setupStep === "pin") setSetupStep("referrer");
+        else if (setupStep === "referrer") setSetupStep("device");
+        return;
+      }
+      setScreen("hall");
+    };
+    return configureTelegramBackButton({ visible, onClick: onBack });
+  }, [isTelegramRuntime, onboarded, setupStep, topLevelScreen]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return undefined;
