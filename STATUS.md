@@ -38,6 +38,6 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 ## External blocker: Telegram-connected staging
 
-Static Vercel staging is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret, public API/Worker host, managed Postgres/Redis connection and final API origin injection. The supplied Supabase dashboard link is not an API credential and was not written to; the supplied GitHub repository is public but currently empty, and no remote was added or pushed without explicit repository authorization.
+Static Vercel staging is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret, public API/Worker host, managed Postgres/Redis connection and final API origin injection. The supplied Supabase dashboard link is not an API credential and was not written to. The implementation is committed and pushed to `codex/telegram-miniapp-staging` in the supplied GitHub repository.
 
 Until that bundle exists, keep `REAL_MONEY_ENABLED=false`, `TOP_UP_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, `CASH_REWARD_ENABLED=false`, `PACKET_PROVIDER=demo` and `TELEGRAM_MOCK_ENABLED=true`.
