@@ -2,6 +2,18 @@
   "name": "@project12/api",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "tsx watch src/server.ts", "build": "tsc --noEmit" },
-  "dependencies": { "@project12/contracts": "workspace:*", "@project12/game-engine": "workspace:*", "@project12/ledger": "workspace:*", "@project12/telegram": "workspace:*" }
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "2.1.0",
+    "@project12/contracts": "workspace:*",
+    "@project12/database": "workspace:*",
+    "@project12/game-engine": "workspace:*",
+    "@project12/ledger": "workspace:*",
+    "@project12/telegram": "workspace:*",
+    "@types/pg": "8.11.10",
+    "pg": "8.13.1"
+  }
 }

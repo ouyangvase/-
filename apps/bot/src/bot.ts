@@ -1,3 +1,4 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
 type WebAppButton = { text: string; web_app: { url: string } };
@@ -19,9 +20,10 @@ export type BotCommand = { command: string; description: string };
 export type MenuButtonConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type MainMiniAppConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true };
+export type TelegramUpdate = { message?: { chat?: { id?: string | number }; text?: string } };
 
-const miniAppUrl = process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
-const botUsername = process.env.BOT_USERNAME ?? "project12_demo_bot";
+const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
+const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAME ?? "project12_demo_bot";
 
 export const botCommands: BotCommand[] = [
   { command: "start", description: "打开 PROJECT 12" },
@@ -35,6 +37,10 @@ export const botCommands: BotCommand[] = [
 ];
 
 export function buildStartDeepLink(referralCode?: string): string {
+  return `https://t.me/${botUsername}?start=${referralCode ? `ref_${encodeURIComponent(referralCode)}` : "hall"}`;
+}
+
+export function buildMiniAppDeepLink(referralCode?: string): string {
   return `https://t.me/${botUsername}?startapp=${referralCode ? `ref_${encodeURIComponent(referralCode)}` : "hall"}`;
 }
 
@@ -101,7 +107,70 @@ export function handleMockUpdate(update: { message?: { chat?: { id?: string | nu
   return buildCommandMessage(message.chat.id, command, startParam);
 }
 
+export function handleTelegramUpdate(update: TelegramUpdate): BotMessage | NotificationPayload | null {
+  return handleMockUpdate(update);
+}
+
+function writeJson(response: ServerResponse, status: number, payload: unknown): void {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(payload));
+}
+
+function readBody(request: IncomingMessage): Promise<TelegramUpdate> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    request.on("data", (chunk) => data += chunk);
+    request.on("end", () => {
+      try { resolve(data ? JSON.parse(data) as TelegramUpdate : {}); } catch { reject(new Error("Invalid Telegram update")); }
+    });
+    request.on("error", reject);
+  });
+}
+
+async function processUpdate(update: TelegramUpdate): Promise<{ handled: boolean; mock: boolean }> {
+  const payload = handleTelegramUpdate(update);
+  if (!payload) return { handled: false, mock: !process.env.TELEGRAM_BOT_TOKEN };
+  if (!process.env.TELEGRAM_BOT_TOKEN) return { handled: true, mock: true };
+  await sendBotApi("sendMessage", payload as unknown as Record<string, unknown>);
+  return { handled: true, mock: false };
+}
+
+async function configureWebhook(): Promise<void> {
+  const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
+  if (!webhookUrl || !process.env.TELEGRAM_BOT_TOKEN) return;
+  await sendBotApi("setWebhook", {
+    url: webhookUrl,
+    secret_token: process.env.TELEGRAM_WEBHOOK_SECRET,
+    allowed_updates: ["message"]
+  });
+}
+
+async function startBotService(): Promise<void> {
+  const port = Number(process.env.BOT_PORT ?? 8790);
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const server = createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (request.method === "GET" && url.pathname === "/health") return writeJson(response, 200, { ok: true, mode: process.env.APP_MODE ?? "demo", tokenConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN), webhookConfigured: Boolean(process.env.TELEGRAM_WEBHOOK_URL) });
+      if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+        if (secret && request.headers["x-telegram-bot-api-secret-token"] !== secret) return writeJson(response, 401, { error: "Webhook secret mismatch" });
+        const result = await processUpdate(await readBody(request));
+        return writeJson(response, 200, { ok: true, ...result });
+      }
+      return writeJson(response, 404, { error: "Not found" });
+    } catch (error) {
+      return writeJson(response, 400, { error: error instanceof Error ? error.message : "Bot request failed" });
+    }
+  });
+  server.listen(port, "0.0.0.0", () => console.log(`PROJECT 12 Bot service listening on ${port}`));
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    await configureBot();
+    await configureWebhook();
+  } else {
+    console.log(JSON.stringify({ service: "bot", mode: process.env.APP_MODE ?? "demo", status: "MOCK_ONLY", commands: botCommands, menuButton: buildMenuButtonConfig(), mainMiniApp: buildMainMiniAppConfig(), sampleStartResponse: handleMockUpdate({ message: { chat: { id: "demo-chat" }, text: "/start ref_P12-DEMO-01" } }) }, null, 2));
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const sample = handleMockUpdate({ message: { chat: { id: "demo-chat" }, text: "/start ref_P12-DEMO-01" } });
-  console.log(JSON.stringify({ service: "bot", mode: process.env.APP_MODE ?? "demo", status: "MOCK_ONLY", commands: botCommands, menuButton: buildMenuButtonConfig(), mainMiniApp: buildMainMiniAppConfig(), sampleStartResponse: sample }, null, 2));
+  void startBotService().catch((error: unknown) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
 }

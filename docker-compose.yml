@@ -74,9 +74,15 @@ services:
     build: { context: ., dockerfile: infra/docker/bot.Dockerfile }
     environment:
       APP_MODE: demo
+      BOT_PORT: 8790
       TELEGRAM_MOCK_ENABLED: "true"
       MINIAPP_ORIGIN: http://miniapp:4173
       API_ORIGIN: http://api:8787
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     depends_on: [api, miniapp]
 volumes:
   pgdata:

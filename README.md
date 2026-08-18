@@ -19,9 +19,9 @@ pnpm dev
 - Mini App: http://localhost:4173
 - Admin: http://localhost:4174
 - API health: http://localhost:8787/health
-- Bot adapter: `pnpm --filter @project12/bot dev` (prints a mock `/start` response; never sends)
+- Bot service: `pnpm --filter @project12/bot dev` (Demo listens on `http://localhost:8790/health` and `/telegram/webhook`; it never sends without a token)
 
-The UI uses a deterministic local demo fallback when the API is not running. The API exposes the same demo state and server-side game/ledger rules.
+The UI uses a deterministic local demo fallback when the API is not running. The API exposes the same demo state and server-side game/ledger rules. When `DATABASE_URL` is set, identity, sessions, onboarding security data, idempotency keys, round events, outbox events, audit records and balanced journals are persisted to PostgreSQL; without it, the deterministic memory fallback remains available only for local Demo mode.
 
 ## Safety boundary
 

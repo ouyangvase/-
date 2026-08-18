@@ -51,7 +51,7 @@ BEGIN
     ('00000000-0000-0000-0001-000000000005', game_id, 'P12 Audit Table', 'OPEN')
   ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
   INSERT INTO rounds (id, room_id, rule_version_id, state, state_ends_at, server_seed_hash, banker_user_id)
-  VALUES ('00000000-0000-0000-0001-000000000004', '00000000-0000-0000-0001-000000000003', rule_id, 'BETTING', now() + interval '28 seconds', 'demo-seed-hash', player_id)
+  VALUES ('00000000-0000-0000-0001-000000000004', '00000000-0000-0000-0001-000000000003', rule_id, 'BANKER_BIDDING', now() + interval '28 seconds', 'demo-seed-hash', NULL)
   ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, state_ends_at = EXCLUDED.state_ends_at;
 
   FOR i IN 1..30 LOOP

@@ -1,0 +1,8 @@
+{
+  "name": "@project12/database",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "pg": "^8.13.1" },
+  "devDependencies": { "@types/pg": "^8.11.10" }
+}
