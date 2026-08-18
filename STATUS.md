@@ -5,7 +5,7 @@ Date: 2026-08-19
 ## Delivered
 
 - The benchmark decks and supplied screenshots remain classified as source/benchmark evidence; they do not override the implementation request. The design system is persisted under `design-system/project-12/`.
-- The Mini App has onboarding, public routes (`/hall`, `/wallet`, `/chat`, `/profile`, `/rules`, `/game/:id`, `/missions`, `/referral`), safe-area handling, Telegram bridge, SecureStorage device key pair, referral deep links, rules, hall, round centre, wallet ledger, chat, profile, missions and referral surfaces.
+- The Mini App has onboarding, public routes (`/hall`, `/wallet`, `/chat`, `/profile`, `/rules`, `/game/:id`, `/missions`, `/referral`), safe-area handling, Telegram bridge, SecureStorage device key pair, referral deep links, rules, hall, round centre, wallet ledger, chat, profile, missions and referral surfaces. In a Telegram runtime, onboarding and all financial-state writes now stop when the API is unavailable or returns an error; only a non-Telegram local browser may use the deterministic Demo fallback.
 - The server uses the canonical round states `LOBBY`, `BANKER_BIDDING`, `BETTING`, `PACKET_SENT`, `CLAIMING`, `EVALUATING`, `SETTLING`, `ROUND_COMPLETE`, `ROUND_CANCELLED`, `REFUNDING`, `REFUNDED`, `DISPUTED`.
 - The game engine covers banker bid tie-breaking, packet digit rules, source-confirmed hand examples, claimed-at settlement order, bet-accepted tail packets, WIN/LOSE/TIE/WATERED settlement branches and fee/pool arithmetic.
 - Every demo credit write uses an idempotency key and a balanced journal; fee and reward lines preserve two decimal places. Real-money, payment, top-up, withdrawal and cash-reward paths are server-disabled.
@@ -26,7 +26,7 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 | `pnpm test` | 6 files, 35 passed |
 | `pnpm build` | Mini App, Admin, API, Worker and Bot passed |
 | `pnpm typecheck` / `pnpm lint` | passed; lint is intentionally the strict TypeScript gate in this small repo |
-| `pnpm test:e2e` | 6 responsive flow projects passed; visual baseline project passed; 5 duplicate visual projects skipped; flow includes banker bidding |
+| `pnpm test:e2e` | 13 passed: six responsive demo flows, six Telegram-runtime guard flows and one visual baseline; 5 duplicate visual projects skipped |
 | API smoke | passed: auth, HttpOnly cookie, idempotent bet replay, claim, two-decimal settlement (`playerCredit=2387.5`, Fee `112.5`), onboarding and `REAL_MONEY_DISABLED` guard |
 | Staging auth gate | passed: `APP_MODE=staging`, mock disabled and unsigned initData return 503 `TELEGRAM_SIGNED_INIT_DATA_REQUIRED` |
 | Load | passed: 100 virtual users × 20 rounds, 2,200 requests, 0 failed, p50 2ms, p95 7ms, 100 replay requests |

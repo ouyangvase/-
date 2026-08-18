@@ -22,4 +22,21 @@ test("player can complete the safe demo round path", async ({ page }) => {
   await page.getByRole("button", { name: /返回游戏大厅/ }).click();
   await page.getByRole("button", { name: "我", exact: true }).click();
   await expect(page.getByText("资金明细")).toBeVisible();
+  await page.getByRole("button", { name: /推广与邀请/ }).click();
+  await page.getByLabel("邀请码 / UID").fill("DEMO-INVITE");
+  await page.getByRole("button", { name: /下一步/ }).click();
+  await expect(page.getByRole("dialog", { name: "确认绑定邀请人？" })).toBeVisible();
+  await page.getByRole("button", { name: "确认绑定" }).click();
+  await expect(page.getByRole("status")).toContainText("邀请关系已记录");
+});
+
+test("Telegram runtime cannot silently continue when the API is unavailable", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { Telegram: { WebApp: { initData: string } } }).Telegram = { WebApp: { initData: "signed-init-data-placeholder" } };
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
+  await page.getByRole("button", { name: /绑定本设备/ }).click();
+  await expect(page.getByRole("heading", { name: "新设备登录" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "设备绑定失败" })).toBeVisible();
 });
