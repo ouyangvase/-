@@ -130,7 +130,10 @@ function readBody(request: IncomingMessage): Promise<TelegramUpdate> {
 async function processUpdate(update: TelegramUpdate): Promise<{ handled: boolean; mock: boolean }> {
   const payload = handleTelegramUpdate(update);
   if (!payload) return { handled: false, mock: !process.env.TELEGRAM_BOT_TOKEN };
-  if (!process.env.TELEGRAM_BOT_TOKEN) return { handled: true, mock: true };
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    if ((process.env.APP_MODE ?? "demo") !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
+    return { handled: true, mock: true };
+  }
   await sendBotApi("sendMessage", payload as unknown as Record<string, unknown>);
   return { handled: true, mock: false };
 }
@@ -151,7 +154,7 @@ async function startBotService(): Promise<void> {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-      if (request.method === "GET" && url.pathname === "/health") return writeJson(response, 200, { ok: true, mode: process.env.APP_MODE ?? "demo", tokenConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN), webhookConfigured: Boolean(process.env.TELEGRAM_WEBHOOK_URL) });
+      if (request.method === "GET" && url.pathname === "/health") { const mode = process.env.APP_MODE ?? "demo"; const tokenConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN); const ready = mode === "demo" || tokenConfigured; return writeJson(response, ready ? 200 : 503, { ok: ready, mode, tokenConfigured, webhookConfigured: Boolean(process.env.TELEGRAM_WEBHOOK_URL) }); }
       if (request.method === "POST" && url.pathname === "/telegram/webhook") {
         const receivedSecret = request.headers["x-telegram-bot-api-secret-token"];
         if ((process.env.APP_MODE ?? "demo") !== "demo" && !secret) return writeJson(response, 503, { code: "WEBHOOK_SECRET_REQUIRED", error: "Telegram webhook secret is not configured" });
@@ -169,7 +172,10 @@ async function startBotService(): Promise<void> {
     await configureBot();
     await configureWebhook();
   } else {
-    console.log(JSON.stringify({ service: "bot", mode: process.env.APP_MODE ?? "demo", status: "MOCK_ONLY", commands: botCommands, menuButton: buildMenuButtonConfig(), mainMiniApp: buildMainMiniAppConfig(), sampleStartResponse: handleMockUpdate({ message: { chat: { id: "demo-chat" }, text: "/start ref_P12-DEMO-01" } }) }, null, 2));
+    const mode = process.env.APP_MODE ?? "demo";
+    console.log(JSON.stringify(mode === "demo"
+      ? { service: "bot", mode, status: "MOCK_ONLY", commands: botCommands, menuButton: buildMenuButtonConfig(), mainMiniApp: buildMainMiniAppConfig(), sampleStartResponse: handleMockUpdate({ message: { chat: { id: "demo-chat" }, text: "/start ref_P12-DEMO-01" } }) }
+      : { service: "bot", mode, status: "BLOCKED", reason: "TELEGRAM_BOT_TOKEN_REQUIRED" }, null, 2));
   }
 }
 

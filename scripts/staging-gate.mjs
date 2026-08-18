@@ -1,4 +1,9 @@
-const base = process.env.API_URL ?? "http://127.0.0.1:8787";
+const base = process.env.API_URL;
+
+if (!base) {
+  console.error("API_URL is required; point this gate at an explicit non-Demo staging API.");
+  process.exit(1);
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${base}${path}`, options);
