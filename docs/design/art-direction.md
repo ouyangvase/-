@@ -42,7 +42,8 @@ Motion is an instrument response: a ring indexes, an aperture opens, a measureme
 
 ## Responsive frame
 
+- The product surface is always a phone-width Mini App: `width: min(100vw, 430px)`.
 - Primary concept frame: 390 × 844.
-- Narrow Telegram fallback: 320px minimum.
+- Narrow Telegram fallback: 320 × 667 minimum.
 - Large phone: 430 × 932.
-- Desktop QA: 1440 × 900 with a centered 760px app column and no stretched phone mockup.
+- Desktop is only a development harness around the phone surface; no screen switches to desktop columns or a desktop navigation model.

@@ -13,12 +13,13 @@ The table below supersedes the historical pre-redesign checks in the original fi
 | Ledger trust | `14-wallet-ledger.png` | oversized balance, references, changes, balance-after, no cash action |
 | Telegram context | `15-telegram-destinations.png` | five explicit destinations and graceful unconfigured state |
 | Account/network | `16-profile-network.png` | editorial settings list and private-network language |
-| Responsive shell | all 16 captures at 390 × 844 | edge-to-edge bottom rail, no horizontal overflow observed |
+| Responsive shell | all 16 captures at 390 × 844; `desktop-harness-mobile-surface.png` | the same 320–430px phone surface is preserved inside a desktop QA harness; no desktop layout is introduced |
 
 ## Mismatch ledger
 
 - Tier A hero video is not yet wired into the default visual because the generated motion job must be checked for temporal consistency before being shipped. The static Higgsfield poster is wired and is the source of truth.
 - Telegram’s native header and MainButton cannot be reproduced in a desktop browser; the local QA shell uses the in-app fallback header while the bridge remains active in Telegram.
+- The desktop screenshot is a harness check only. The product shell is capped at 430px and the screen compositions remain phone-first at every viewport.
 - The current demo uses a controlled static state snapshot until the API/realtime service is available; this is a deliberate demo limitation, not a visual approximation.
 
 ## Historical pre-redesign checks

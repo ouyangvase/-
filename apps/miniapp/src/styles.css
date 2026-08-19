@@ -33,3 +33,53 @@ body::before { position: fixed; z-index: -1; inset: 0; pointer-events: none; bac
 .toast { position: fixed; z-index: 25; right: 18px; bottom: calc(79px + var(--safe-bottom)); left: 18px; max-width: 520px; margin: 0 auto; padding: 14px 16px; border: 1px solid var(--brass); color: var(--bone); background: var(--graphite); font-size: 12px; box-shadow: 0 14px 42px rgba(0,0,0,.4); }
 @media (max-width: 680px) { .app-shell { padding-right: 18px; padding-left: 18px; } .demo-pull > span:last-child { display: none; } .hall-hero, .rules-intro, .rules-workbench, .game-instrument, .setup-layout { grid-template-columns: 1fr; } .hall-hero { min-height: 0; } .hero-copy { order: 2; padding: 25px 0 0; } .hall-hero .mechanism-visual { order: 1; min-height: 355px; } .rail-items { grid-template-columns: 1fr; gap: 15px; } .round-evidence { grid-template-columns: 1fr 1fr; } .round-evidence .outline-button { grid-column: 1 / -1; width: 100%; } .rules-intro .mechanism-visual { max-width: 260px; min-height: 230px; } .rules-workbench { gap: 0; } .rules-sticky { position: sticky; z-index: 3; top: 0; padding: 15px 0; background: rgba(11,11,12,.94); } .rules-sticky strong { font-size: 26px; } .rule-step { min-height: 110px; } .game-instrument .mechanism-visual { min-height: 330px; } .instrument-data { grid-template-columns: repeat(3, 1fr); gap: 8px; } .instrument-data span { display: block; padding: 9px 0; } .instrument-data strong { display: block; margin-top: 6px; } .fairness-grid { grid-template-columns: 1fr; } .ledger-line { grid-template-columns: 64px 1fr auto; } .ledger-line > span:last-child { grid-column: 2 / 4; text-align: right; } .profile-hero { grid-template-columns: auto 1fr; } .profile-hero .mechanism-visual { grid-column: 1 / -1; max-width: 280px; min-height: 220px; } .settings-list button { grid-template-columns: 96px 1fr 20px; } .setup-shell { padding-right: 20px; padding-left: 20px; } .setup-layout { gap: 26px; } .setup-layout .mechanism-visual { min-height: 310px; } .setup-copy h1 { font-size: 50px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } .mechanism-media { display: none; } }
+
+/* Mobile product surface: the Mini App is a phone, not a desktop site in a wider box. */
+html, body, #root { width: 100%; min-width: 320px; min-height: 100%; }
+body { overflow-x: hidden; background: #000; }
+.app-shell, .setup-shell { width: min(100%, 430px); max-width: 430px; margin: 0 auto; }
+.app-shell { padding-right: 18px; padding-left: 18px; }
+.setup-shell { display: block; min-height: 100dvh; padding: calc(var(--safe-top) + 20px) 18px calc(28px + var(--safe-bottom)); }
+.setup-layout { display: flex; width: 100%; max-width: none; flex-direction: column; gap: 26px; align-items: stretch; }
+.setup-layout > .mechanism-visual { width: 100%; min-height: 0; aspect-ratio: 1 / .86; }
+.setup-copy { max-width: none; }
+.setup-copy h1 { font-size: clamp(44px, 13vw, 58px); }
+.hall-hero { display: flex; min-height: 0; flex-direction: column; }
+.hall-hero .mechanism-visual { order: 1; width: 100%; min-height: 0; aspect-ratio: 1 / .92; }
+.hero-copy { order: 2; padding: 25px 0 0; }
+.hero-copy h2 { font-size: clamp(40px, 11vw, 58px); }
+.round-evidence { grid-template-columns: 1fr; gap: 19px; }
+.round-evidence .outline-button { width: 100%; }
+.rail-items { grid-template-columns: 1fr; gap: 15px; }
+.live-strip { flex-wrap: wrap; gap: 7px; padding: 8px 0; font-size: 9px; }
+.strip-rule { width: 16px; margin: 0 2px; }
+.rules-intro { display: flex; flex-direction: column; gap: 22px; align-items: stretch; }
+.rules-intro .mechanism-visual { width: 100%; max-width: none; min-height: 0; aspect-ratio: 1 / .82; }
+.rules-workbench { display: block; }
+.rules-sticky { top: 0; }
+.game-instrument { display: flex; flex-direction: column; gap: 18px; }
+.game-instrument .mechanism-visual { width: 100%; min-height: 0; aspect-ratio: 1 / .94; }
+.instrument-data { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.instrument-data span { display: block; padding: 9px 0; }
+.instrument-data strong { display: block; margin-top: 6px; }
+.game-action-zone { max-width: none; }
+.fairness-grid { grid-template-columns: 1fr; }
+.ledger-line { grid-template-columns: 58px 1fr auto; gap: 10px; }
+.ledger-line > span:last-child { grid-column: 2 / 4; text-align: right; }
+.profile-hero { grid-template-columns: auto 1fr; }
+.profile-hero .mechanism-visual { grid-column: 1 / -1; width: 100%; max-width: none; min-height: 0; aspect-ratio: 1 / .78; }
+.profile-footer { flex-wrap: wrap; }
+.settings-list button { grid-template-columns: 96px 1fr 20px; }
+.bottom-nav { right: auto; left: 50%; width: min(100%, 430px); max-width: none; transform: translateX(-50%); padding-right: 18px; padding-left: 18px; }
+.toast { right: auto; left: 50%; width: min(calc(100% - 36px), 394px); max-width: none; transform: translateX(-50%); }
+
+@media (max-width: 350px) {
+  .app-shell { padding-right: 15px; padding-left: 15px; }
+  .setup-shell { padding-right: 15px; padding-left: 15px; }
+  .topbar { min-height: 68px; }
+  .topbar h1 { font-size: 31px; }
+  .hero-copy h2 { font-size: 39px; }
+  .mechanism-state-rail span { font-size: 8px; }
+  .settings-list button { grid-template-columns: 82px 1fr 20px; gap: 9px; }
+  .ledger-line { grid-template-columns: 48px 1fr auto; }
+}

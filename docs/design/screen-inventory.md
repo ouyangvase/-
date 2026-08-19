@@ -1,6 +1,6 @@
 # PROJECT 12 — Screen inventory
 
-The following 16 concepts are the acceptance set. They are states of one system, not 16 separate themes.
+The following 16 concepts are the acceptance set. They are states of one phone-width system, not 16 separate themes.
 
 | # | Screen / state | Required evidence | Primary action |
 |---:|---|---|---|
