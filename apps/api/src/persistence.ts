@@ -30,6 +30,7 @@ export type UserRuntimeSnapshot = {
   locked: number;
   bankerPool: number;
   onboarding: { deviceBound: boolean; referrerBound: boolean; pinSet: boolean };
+  ledger: Array<{ id: string; reason: string; change: number; balanceAfter: number; createdAt: string }>;
 };
 
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
@@ -76,7 +77,15 @@ export class ApiPersistence implements PacketStore {
       EXISTS (SELECT 1 FROM security_pins WHERE user_id = u.id) AS pin_set
       FROM telegram_identities ti JOIN users u ON u.id = ti.user_id WHERE ti.telegram_user_id = $1`, [telegramUserId]);
     const row = rows[0];
-    return row ? { displayName: row.display_name, available: Number(row.available), locked: Number(row.locked), bankerPool: Number(row.banker_pool), onboarding: { deviceBound: row.device_bound, referrerBound: row.referrer_bound, pinSet: row.pin_set } } : undefined;
+    if (!row) return undefined;
+    const ledgerRows = await this.database.query<{ id: string; reason: string; direction: "DEBIT" | "CREDIT"; amount: string | number; balance_after: string | number; created_at: string | Date }>(`SELECT lj.id::text AS id, lj.reason, ll.direction, ll.amount,
+      SUM(CASE WHEN ll.direction = 'CREDIT' THEN ll.amount ELSE -ll.amount END) OVER (PARTITION BY wa.account_type ORDER BY lj.created_at, lj.id ROWS UNBOUNDED PRECEDING) AS balance_after,
+      lj.created_at
+      FROM ledger_journals lj JOIN ledger_lines ll ON ll.journal_id = lj.id JOIN wallet_accounts wa ON wa.id = ll.account_id
+      JOIN telegram_identities ti ON ti.user_id = wa.user_id
+      WHERE ti.telegram_user_id = $1 AND wa.account_type = 'USER_AVAILABLE'
+      ORDER BY lj.created_at DESC, lj.id DESC LIMIT 50`, [telegramUserId]);
+    return { displayName: row.display_name, available: Number(row.available), locked: Number(row.locked), bankerPool: Number(row.banker_pool), onboarding: { deviceBound: row.device_bound, referrerBound: row.referrer_bound, pinSet: row.pin_set }, ledger: ledgerRows.map((entry) => ({ id: entry.id, reason: entry.reason, change: (entry.direction === "CREDIT" ? 1 : -1) * Number(entry.amount), balanceAfter: Number(entry.balance_after), createdAt: iso(entry.created_at) })) };
   }
 
   async createInternalPacket(input: { roundId: string; amount: number; serverSeedHash?: string }): Promise<PacketRecord> {

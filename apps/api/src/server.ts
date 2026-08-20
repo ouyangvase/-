@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { assertTransition, classifyHand, demoRules, hashSeed, settlePlayer } from "../../../packages/game-engine/src/index.js";
@@ -18,7 +19,7 @@ const sessions = new Map<string, { userId: string; role: "PLAYER" | "ADMIN"; exp
 const requestSessions = new WeakMap<IncomingMessage, { userId: string; role: "PLAYER" | "ADMIN" }>();
 const idempotency = new Map<string, unknown>();
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
-const balances: Record<LedgerAccount, number> = { USER_AVAILABLE: 12500, USER_LOCKED: 0, USER_LOCKED_BANKER_POOL: 0, BANKER_POOL: 4800, PLATFORM_FEE: 0, DEMO_GRANTS: 12630, CAMPAIGN_REWARD_RESERVE: 0, PENDING_ADJUSTMENT: 0 };
+const baseBalances: Record<LedgerAccount, number> = { USER_AVAILABLE: 12500, USER_LOCKED: 0, USER_LOCKED_BANKER_POOL: 0, BANKER_POOL: 4800, PLATFORM_FEE: 0, DEMO_GRANTS: 12630, CAMPAIGN_REWARD_RESERVE: 0, PENDING_ADJUSTMENT: 0 };
 const auditLogs: Array<{ id: string; actor: string; action: string; referenceType: string; referenceId: string; before?: unknown; after?: unknown; createdAt: string }> = [];
 const roundEvents: Array<{ id: string; roundId: string; from?: RoundState; to: RoundState; payload: Record<string, unknown>; createdAt: string }> = [];
 const realtimeClients = new Set<ServerResponse>();
@@ -39,14 +40,28 @@ const serverSeed = "project12-demo-seed-247";
 const packetProvider = createPacketProvider(persistence);
 let runtimeHydrated = false;
 
-const state: DemoState = {
-  user: { id: "demo-player-01", displayName: "Alex Tan", role: "PLAYER", available: balances.USER_AVAILABLE, locked: balances.USER_LOCKED, riskStatus: "CLEAR" },
-  round: { id: "R-0247", state: "BANKER_BIDDING", ruleVersion: demoRules.id, endsAt: "00:28", players: 8, banker: "Mira", seedHash: hashSeed(serverSeed).slice(0, 16) + "…", bankPool: balances.BANKER_POOL },
+const baseState: DemoState = {
+  user: { id: "demo-player-01", displayName: "Alex Tan", role: "PLAYER", available: baseBalances.USER_AVAILABLE, locked: baseBalances.USER_LOCKED, riskStatus: "CLEAR" },
+  round: { id: "R-0247", state: "BANKER_BIDDING", ruleVersion: demoRules.id, endsAt: "00:28", players: 8, banker: "Mira", seedHash: hashSeed(serverSeed).slice(0, 16) + "…", bankPool: baseBalances.BANKER_POOL },
   missions: [{ id: "rounds", title: "Complete demo rounds", progress: 2, target: 3, reward: 120 }, { id: "login", title: "Return for 3 days", progress: 1, target: 3, reward: 80 }, { id: "hand", title: "Collect a special hand", progress: 0, target: 1, reward: 160 }],
   referrals: { code: "P12-ALEX", direct: 4, qualified: 2, pendingReward: 180 },
   leaderboard: [{ userId: "demo-player-01", displayName: "Alex Tan", points: 1280, rank: 1 }, { userId: "demo-banker-01", displayName: "Mira", points: 1140, rank: 2 }, { userId: "demo-player-02", displayName: "Jordan", points: 980, rank: 3 }],
   ledger: [{ id: "J-1004", reason: "Demo round entry locked", change: -250, balanceAfter: 12500, createdAt: "Today, 14:32" }]
 };
+
+type ApiRuntime = { balances: Record<LedgerAccount, number>; state: DemoState };
+const fallbackRuntime: ApiRuntime = { balances: baseBalances, state: baseState };
+const runtimeStorage = new AsyncLocalStorage<ApiRuntime>();
+function activeRuntime(): ApiRuntime { return runtimeStorage.getStore() ?? fallbackRuntime; }
+function createRequestRuntime(): ApiRuntime { return { balances: { ...fallbackRuntime.balances }, state: structuredClone(fallbackRuntime.state) }; }
+const balances = new Proxy<Record<LedgerAccount, number>>({} as Record<LedgerAccount, number>, {
+  get: (_target, property) => activeRuntime().balances[property as LedgerAccount],
+  set: (_target, property, value) => { activeRuntime().balances[property as LedgerAccount] = Number(value); return true; }
+});
+const state = new Proxy<DemoState>({} as DemoState, {
+  get: (_target, property) => activeRuntime().state[property as keyof DemoState],
+  set: (_target, property, value) => { activeRuntime().state[property as keyof DemoState] = value; return true; }
+});
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, idempotency-key, x-demo-user, x-session-token, x-demo-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" });
@@ -124,14 +139,15 @@ function rejectMoney(response: ServerResponse) { return json(response, 403, { co
 function requirePlayer(request: IncomingMessage, response: ServerResponse): { userId: string; role: "PLAYER" | "ADMIN" } | undefined { const identity = session(request); if (!identity) { json(response, 401, { error: "Unauthorized" }); return undefined; } return identity; }
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
 async function hydrateRuntime(): Promise<void> { if (runtimeHydrated || !persistence.configured) return; const snapshot = await persistence.loadRoundRuntime(); if (snapshot) { state.round.state = snapshot.state; state.round.bankPool = snapshot.bankerPool; balances.BANKER_POOL = snapshot.bankerPool; } runtimeHydrated = true; }
-async function hydrateUserRuntime(userId: string): Promise<void> {
+async function hydrateUserRuntime(userId: string, runtime = activeRuntime()): Promise<void> {
   const snapshot = await persistence.loadUserRuntime(userId);
   if (!snapshot) return;
-  balances.USER_AVAILABLE = snapshot.available;
-  balances.USER_LOCKED = snapshot.locked;
-  balances.BANKER_POOL = snapshot.bankerPool;
-  state.user = { ...state.user, id: userId, displayName: snapshot.displayName, available: snapshot.available, locked: snapshot.locked };
-  state.round.bankPool = snapshot.bankerPool;
+  runtime.balances.USER_AVAILABLE = snapshot.available;
+  runtime.balances.USER_LOCKED = snapshot.locked;
+  runtime.balances.BANKER_POOL = snapshot.bankerPool;
+  runtime.state.user = { ...runtime.state.user, id: userId, displayName: snapshot.displayName, available: snapshot.available, locked: snapshot.locked };
+  runtime.state.round.bankPool = snapshot.bankerPool;
+  if (snapshot.ledger.length > 0) runtime.state.ledger = snapshot.ledger;
   onboarding.set(userId, snapshot.onboarding);
 }
 
@@ -159,7 +175,9 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     const healthPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
     if (!healthPath.startsWith("/health")) await hydrateRuntime();
     const activeSession = await resolveSession(request);
-    if (activeSession) await hydrateUserRuntime(activeSession.userId);
+    const runtime = persistence.configured && activeSession ? createRequestRuntime() : fallbackRuntime;
+    return runtimeStorage.run(runtime, async () => {
+    if (activeSession) await hydrateUserRuntime(activeSession.userId, runtime);
     if (request.method === "GET" && healthPath === "/health/live") return json(response, 200, { ok: true, service: "api", mode: appMode });
     if (request.method === "GET" && healthPath === "/health/worker") { const worker = await workerHealth(); return json(response, worker.status === "unavailable" ? 503 : 200, { ok: worker.status !== "unavailable", service: "worker", ...worker }); }
     if (request.method === "GET" && (healthPath === "/health/ready" || healthPath === "/health")) { const databaseHealth = await persistence.health(); const worker = await workerHealth(); const ready = appMode === "demo" ? true : databaseHealth === "healthy" && worker.status === "healthy"; return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, services: { api: ready ? "healthy" : "degraded", worker: worker.status, bot: process.env.TELEGRAM_BOT_TOKEN ? "configured" : "blocked", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
@@ -229,6 +247,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
       return json(response, 200, { ok: true, accepted: true, updateId, updateType });
     }
     return json(response, 404, { error: "Not found" });
+    });
   } catch (error) { if (error instanceof PacketProviderError) return json(response, error.code === "AUTHORIZATION_REQUIRED" ? 401 : 503, { code: error.code, error: error.message }); if (error instanceof Error && error.message.startsWith("ROUND_STATE_CONFLICT:")) return json(response, 409, { code: "ROUND_STATE_CONFLICT", error: error.message }); return json(response, 400, { error: error instanceof Error ? error.message : "Request failed" }); }
 };
 
