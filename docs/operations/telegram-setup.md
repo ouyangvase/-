@@ -5,7 +5,7 @@
 3. Set the Mini App domain to the HTTPS Vercel origin. `/newapp` is optional; the `/start` reply keyboard and Bot Menu Button use `web_app` directly.
 4. Configure the Menu Button, commands and webhook with `pnpm telegram:configure` from a server environment. The webhook target is `/api/telegram/webhook`.
 5. Configure a webhook URL and secret; validate Telegram `initData` server-side.
-6. Apply `infra/schema.sql` and all ordered `infra/migrations/*.sql` files (including `006-persistent-internal-packets.sql` and `007-telegram-launch-grants.sql`) to the Supabase/Postgres database before enabling staging mode. Migration `007` makes the reply-keyboard `/start` launch a one-time authenticated Mini App session.
+6. Apply `infra/schema.sql` and all ordered `infra/migrations/*.sql` files (including `006-persistent-internal-packets.sql` and `007-telegram-launch-grants.sql`) to the Supabase/Postgres database, then run `pnpm db:seed` once. The seed creates the canonical Project 12 room/round, system demo-credit accounts and rule records; it does not reset an existing round state. Migration `007` makes the reply-keyboard `/start` launch a one-time authenticated Mini App session.
 7. Run `pnpm telegram:verify` after `pnpm telegram:configure`; it checks the Bot identity, webhook URL, Menu Button URL and command list without printing the Bot token.
 8. Test only with demo credits and verify the health endpoint before opening the app.
 

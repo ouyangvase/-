@@ -1,4 +1,5 @@
 export type LedgerAccount = "USER_AVAILABLE" | "USER_LOCKED" | "USER_LOCKED_BANKER_POOL" | "BANKER_POOL" | "PLATFORM_FEE" | "DEMO_GRANTS" | "CAMPAIGN_REWARD_RESERVE" | "PENDING_ADJUSTMENT";
+const ledgerAccounts: LedgerAccount[] = ["USER_AVAILABLE", "USER_LOCKED", "USER_LOCKED_BANKER_POOL", "BANKER_POOL", "PLATFORM_FEE", "DEMO_GRANTS", "CAMPAIGN_REWARD_RESERVE", "PENDING_ADJUSTMENT"];
 
 export interface LedgerLine { account: LedgerAccount; direction: "DEBIT" | "CREDIT"; amount: number; }
 export interface Journal { id: string; referenceType: string; referenceId: string; idempotencyKey: string; reason: string; lines: LedgerLine[]; }
@@ -30,7 +31,7 @@ export function createTransferJournal(input: {
 }
 
 export function applyJournal(balances: Record<LedgerAccount, number>, journal: Journal): Record<LedgerAccount, number> {
-  const next = { ...balances };
+  const next = Object.fromEntries(ledgerAccounts.map((account) => [account, balances[account]])) as Record<LedgerAccount, number>;
   for (const line of journal.lines) next[line.account] += line.direction === "DEBIT" ? -line.amount : line.amount;
   if (Object.values(next).some((value) => value < -0.00000001)) throw new Error("Ledger would create a negative balance");
   return next;

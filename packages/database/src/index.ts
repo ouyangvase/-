@@ -39,6 +39,7 @@ export class Project12Database {
   async health(): Promise<"disabled" | "healthy" | "unavailable"> {
     if (!this.pool) return "disabled";
     try {
+      const canonicalRoundId = process.env.DEMO_ROUND_DB_ID ?? "00000000-0000-0000-0001-000000000004";
       const result = await this.pool.query<{ ready: boolean }>(`SELECT
         to_regclass('public.users') IS NOT NULL
         AND to_regclass('public.telegram_identities') IS NOT NULL
@@ -46,7 +47,9 @@ export class Project12Database {
         AND to_regclass('public.ledger_journals') IS NOT NULL
         AND to_regclass('public.outbox_events') IS NOT NULL
         AND to_regclass('public.telegram_launch_grants') IS NOT NULL
-        AND to_regclass('public.worker_heartbeats') IS NOT NULL AS ready`);
+        AND to_regclass('public.worker_heartbeats') IS NOT NULL
+        AND EXISTS (SELECT 1 FROM rounds WHERE id::text = $1)
+        AND EXISTS (SELECT 1 FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL') AS ready`, [canonicalRoundId]);
       return result.rows[0]?.ready ? "healthy" : "unavailable";
     } catch { return "unavailable"; }
   }

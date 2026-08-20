@@ -9,7 +9,7 @@ import { telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js
 const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 
 type AuditInput = { actor: string; action: string; referenceType: string; referenceId: string; before?: unknown; after?: unknown };
-type RoundEventInput = { roundId: string; from?: RoundState; to: RoundState; payload: Record<string, unknown>; actor: string };
+type RoundEventInput = { roundId: string; from?: RoundState; to: RoundState; stateEndsAt?: Date | null; payload: Record<string, unknown>; actor: string };
 type WorkerHeartbeat = { workerId: string; status: string; heartbeatAt: string };
 export type RoundRuntimeSnapshot = { state: RoundState; bankerUserId?: string; bankerPool: number };
 
@@ -327,7 +327,7 @@ export class ApiPersistence implements PacketStore {
 
   async persistRoundEvent(event: RoundEventInput): Promise<void> {
     await this.run(() => this.database.transaction(async (client) => {
-      const updated = await client.query<{ id: string }>("UPDATE rounds SET state = $2, state_started_at = now(), state_version = state_version + 1 WHERE id = $1 AND ($3::text IS NULL OR state = $3) RETURNING id", [this.roundDatabaseId, event.to, event.from ?? null]);
+      const updated = await client.query<{ id: string }>("UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = $3, state_version = state_version + 1 WHERE id = $1 AND ($4::text IS NULL OR state = $4) RETURNING id", [this.roundDatabaseId, event.to, event.stateEndsAt ?? null, event.from ?? null]);
       if (!updated.rows[0]) throw new Error(`ROUND_STATE_CONFLICT: expected ${event.from ?? "current"}`);
       await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [this.roundDatabaseId, event.from ?? null, event.to, JSON.stringify(event.payload), event.actor]);
     }));

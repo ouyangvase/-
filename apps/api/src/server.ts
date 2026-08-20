@@ -38,7 +38,6 @@ const riskFlags: Array<{ id: string; userId?: string; roundId?: string; status: 
 const adjustments = new Map<string, { id: string; amount: number; reason: string; ticketId: string; createdBy: string; approvedBy?: string; status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED" }>();
 const serverSeed = "project12-demo-seed-247";
 const packetProvider = createPacketProvider(persistence);
-let runtimeHydrated = false;
 
 const baseState: DemoState = {
   user: { id: "demo-player-01", displayName: "Alex Tan", role: "PLAYER", available: baseBalances.USER_AVAILABLE, locked: baseBalances.USER_LOCKED, riskStatus: "CLEAR" },
@@ -120,7 +119,8 @@ function audit(actor: string, action: string, referenceType: string, referenceId
 function queueOutbox(type: string, payload: Record<string, unknown>) { const event = { id: `OB-${String(outboxEvents.length + 1).padStart(4, "0")}`, type, payload, createdAt: now() }; outboxEvents.unshift(event); persistAsync(() => persistence.persistOutbox(type, payload)); return event; }
 function writeRoundEvent(response: ServerResponse, event: typeof roundEvents[number]) { if (response.writableEnded || response.destroyed) return false; try { response.write(`event: round\ndata: ${JSON.stringify(event)}\n\n`); return true; } catch { return false; } }
 function broadcastRoundEvent(event: typeof roundEvents[number]) { for (const response of realtimeClients) if (!writeRoundEvent(response, event)) realtimeClients.delete(response); }
-async function transition(to: RoundState, actor: string, payload: Record<string, unknown> = {}) { const from = state.round.state; assertTransition(from, to); await persistence.persistRoundEvent({ roundId: state.round.id, from, to, payload, actor }); state.round.state = to; const event = { id: `RE-${String(roundEvents.length + 1).padStart(4, "0")}`, roundId: state.round.id, from, to, payload, createdAt: now() }; roundEvents.unshift(event); queueOutbox("ROUND_STATE_CHANGED", { ...event }); audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload }); broadcastRoundEvent(event); return event; }
+function stateDeadline(to: RoundState): Date | null { const seconds: Partial<Record<RoundState, number>> = { BANKER_BIDDING: 30, BETTING: 30, CLAIMING: 45, EVALUATING: 10, SETTLING: 15 }; return seconds[to] === undefined ? null : new Date(Date.now() + seconds[to]! * 1000); }
+async function transition(to: RoundState, actor: string, payload: Record<string, unknown> = {}) { const from = state.round.state; assertTransition(from, to); const stateEndsAt = stateDeadline(to); await persistence.persistRoundEvent({ roundId: state.round.id, from, to, stateEndsAt, payload: { ...payload, stateEndsAt: stateEndsAt?.toISOString() ?? null }, actor }); state.round.state = to; const event = { id: `RE-${String(roundEvents.length + 1).padStart(4, "0")}`, roundId: state.round.id, from, to, payload, createdAt: now() }; roundEvents.unshift(event); queueOutbox("ROUND_STATE_CHANGED", { ...event }); audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload }); broadcastRoundEvent(event); return event; }
 async function writeIdempotent(request: IncomingMessage, response: ServerResponse, work: (key: string) => unknown | Promise<unknown>) { const key = header(request, "idempotency-key"); if (!key) return json(response, 400, { error: "Idempotency-Key is required for writes" }); const persisted = await persistence.getIdempotency(key); if (persisted !== undefined) return json(response, 200, { replayed: true, result: persisted }); if (idempotency.has(key)) return json(response, 200, { replayed: true, result: idempotency.get(key) }); const result = await work(key); idempotency.set(key, result); await persistence.putIdempotency(key, session(request)?.userId ?? "anonymous", result); return json(response, 200, { replayed: false, result }); }
 function createSettlementJournal(idempotencyKey: string, result: ReturnType<typeof settlePlayer>): Journal {
   const stake = result.stake;
@@ -138,7 +138,7 @@ function createRefundJournal(idempotencyKey: string, amount: number): Journal { 
 function rejectMoney(response: ServerResponse) { return json(response, 403, { code: realMoneyDisabled ? "REAL_MONEY_DISABLED" : "PROVIDER_APPROVAL_REQUIRED", message: "Real-money operations are unavailable in this demo." }); }
 function requirePlayer(request: IncomingMessage, response: ServerResponse): { userId: string; role: "PLAYER" | "ADMIN" } | undefined { const identity = session(request); if (!identity) { json(response, 401, { error: "Unauthorized" }); return undefined; } return identity; }
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
-async function hydrateRuntime(): Promise<void> { if (runtimeHydrated || !persistence.configured) return; const snapshot = await persistence.loadRoundRuntime(); if (snapshot) { state.round.state = snapshot.state; state.round.bankPool = snapshot.bankerPool; balances.BANKER_POOL = snapshot.bankerPool; } runtimeHydrated = true; }
+async function hydrateRuntime(runtime: ApiRuntime): Promise<void> { if (!persistence.configured) return; const snapshot = await persistence.loadRoundRuntime(); if (snapshot) { runtime.state.round.state = snapshot.state; runtime.state.round.banker = snapshot.bankerUserId ?? runtime.state.round.banker; runtime.state.round.bankPool = snapshot.bankerPool; runtime.balances.BANKER_POOL = snapshot.bankerPool; } }
 async function hydrateUserRuntime(userId: string, runtime = activeRuntime()): Promise<void> {
   const snapshot = await persistence.loadUserRuntime(userId);
   if (!snapshot) return;
@@ -173,9 +173,9 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "OPTIONS") return json(response, 204, {});
     if (request.method === "POST" && !allowRateLimit(request)) return json(response, 429, { error: "Rate limit exceeded" });
     const healthPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
-    if (!healthPath.startsWith("/health")) await hydrateRuntime();
     const activeSession = await resolveSession(request);
     const runtime = persistence.configured && activeSession ? createRequestRuntime() : fallbackRuntime;
+    if (!healthPath.startsWith("/health")) await hydrateRuntime(runtime);
     return runtimeStorage.run(runtime, async () => {
     if (activeSession) await hydrateUserRuntime(activeSession.userId, runtime);
     if (request.method === "GET" && healthPath === "/health/live") return json(response, 200, { ok: true, service: "api", mode: appMode });
