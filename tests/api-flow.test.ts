@@ -32,6 +32,30 @@ describe("API round flow", () => {
     const authBody = await auth.json() as { token?: string };
     expect(authBody.token).toBeTruthy();
     const session = { "x-session-token": authBody.token! };
+    const verification = await request("/api/verification/status", { headers: session });
+    expect((await verification.json()).status).toBe("UNVERIFIED");
+    const submit = await request("/api/verification/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "api-flow-verification", ...session },
+      body: JSON.stringify({ legalName: "Demo Player", tngAccountNo: "1234567890" })
+    });
+    expect(submit.status).toBe(200);
+    const submitBody = await submit.json() as { result?: { status?: string; tngAccountLast4?: string } };
+    expect(submitBody.result?.status).toBe("PENDING");
+    expect(submitBody.result?.tngAccountLast4).toBe("••••7890");
+    expect(JSON.stringify(submitBody)).not.toContain("Demo Player");
+    expect(JSON.stringify(submitBody)).not.toContain("1234567890");
+    const lockedWallet = await request("/api/wallet", { headers: session });
+    expect(lockedWallet.status).toBe(403);
+    const lockedChat = await request("/api/chat/room", { headers: session });
+    expect(lockedChat.status).toBe(403);
+    const approve = await request("/api/admin/verification/api-flow-user/review", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-demo-admin-token": "admin-demo-only" },
+      body: JSON.stringify({ status: "APPROVED" })
+    });
+    expect(approve.status).toBe(200);
+    expect((await request("/api/verification/status", { headers: session })).status).toBe(200);
     const rooms = await request("/api/rooms", { headers: session });
     expect(rooms.status).toBe(200);
     expect((await rooms.json())[0].roundId).toBe("R-0247");
@@ -52,6 +76,9 @@ describe("API round flow", () => {
     expect((await bet.json()).result.state).toBe("CLAIMING");
     const wallet = await request("/api/wallet", { headers: session });
     expect((await wallet.json()).locked).toBe(250);
+    const chat = await request("/api/chat/room", { headers: session });
+    expect(chat.status).toBe(200);
+    expect((await chat.json()).messages.some((message: { body: string }) => message.body.includes("下注 250 PT"))).toBe(true);
     const claim = await write("/api/rounds/R-0247/packet-claim", "api-flow-claim");
     expect(claim.status).toBe(200);
     expect((await claim.json()).result.hand.type).toBe("反顺");

@@ -121,3 +121,37 @@ body { overflow-x: hidden; background: #000; }
   .reference-banner .mechanism-visual { right: -64px; width: 67%; }
   .reference-game-footer { padding-right: 13px; padding-left: 13px; }
 }
+
+/* Verification and the in-app game room follow the compact Telegram reference flow. */
+.verification-entry { display: grid; grid-template-columns: 28px 1fr 20px; gap: 12px; width: 100%; align-items: center; padding: 17px 0; border: 0; border-bottom: 1px solid var(--hairline); color: var(--bone); background: transparent; text-align: left; }
+.verification-entry > .icon:first-child { color: var(--brass-light); }
+.verification-entry strong, .verification-entry small { display: block; }
+.verification-entry small { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.chat-room-head { padding: 18px 0 20px; border-bottom: 1px solid var(--hairline); }
+.chat-room-head h1 { margin-top: 9px; font-size: clamp(30px, 8vw, 44px); }
+.chat-room-head p { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.chat-round-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+.chat-round-strip span { padding: 11px 9px; border: 1px solid var(--hairline); color: var(--muted); font-family: ui-monospace, monospace; font-size: 9px; }
+.chat-round-strip b { display: block; margin-top: 5px; color: var(--paper); font-size: 11px; }
+.room-message-list { display: grid; gap: 10px; padding: 16px 0; }
+.room-message { padding: 13px 14px; border-left: 2px solid var(--steel); background: rgba(255,255,255,.035); }
+.room-message-system, .room-message-round, .room-message-settlement { border-left-color: var(--brass-light); }
+.room-message-banker { border-left-color: #8db5ff; }
+.room-message-bet, .room-message-packet { border-left-color: #c97567; }
+.room-message-type { color: var(--muted); font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: .08em; }
+.room-message p { margin-top: 7px; color: var(--bone); font-size: 13px; line-height: 1.45; }
+.room-message small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.chat-game-cta { width: 100%; }
+.verification-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; align-items: end; padding: 18px; background: rgba(0,0,0,.72); }
+.verification-modal { width: min(100%, 398px); max-height: calc(100dvh - 36px); margin: 0 auto; overflow: auto; padding: 28px 20px 22px; border: 1px solid rgba(245,245,247,.2); border-radius: 24px; background: #1e1f24; box-shadow: 0 24px 80px rgba(0,0,0,.5); }
+.verification-modal h2 { margin-top: 10px; color: var(--paper); font-size: 30px; letter-spacing: -.06em; }
+.verification-modal > p { margin-top: 14px; color: var(--muted); line-height: 1.7; }
+.verification-icon { display: grid; width: 72px; height: 72px; place-items: center; border: 1px solid rgba(221,180,37,.72); border-radius: 50%; color: #ffd43b; background: rgba(111,91,17,.34); }
+.verification-icon .icon { width: 36px; height: 36px; }
+.verification-masked { display: block; margin-top: 15px; color: var(--brass-light); font-family: ui-monospace, monospace; font-size: 11px; }
+.verification-modal .field-label { display: block; margin-top: 17px; }
+.verification-modal .mechanism-input { width: 100%; margin-top: 7px; }
+.verification-actions { display: grid; grid-template-columns: .8fr 1.2fr; gap: 10px; margin-top: 20px; }
+.verification-close { width: 100%; margin-top: 22px; }
+.verification-privacy { display: block; margin-top: 14px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.verification-modal .error-line { margin-top: 10px; }

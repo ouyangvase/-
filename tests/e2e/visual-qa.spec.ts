@@ -20,7 +20,9 @@ test("captures the required onboarding, round, wallet and social visual states",
   await page.getByRole("button", { name: /进入大厅/ }).click();
   await expect(page.getByRole("heading", { name: "游戏大厅" })).toBeVisible();
   await shot("visual-qa-05-hall");
-  await page.getByRole("button", { name: /进入游戏：12牛牛玩法介绍/ }).click();
+  await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
+  await expect(page.getByRole("heading", { name: "当前游戏聊天室" })).toBeVisible();
+  await page.getByRole("button", { name: /继续当前回合/ }).click();
   await shot("visual-qa-06-game-bidding");
   await page.getByRole("button", { name: /按住确认抢庄/ }).click();
   await shot("visual-qa-07-game-betting");

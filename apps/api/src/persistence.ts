@@ -5,6 +5,7 @@ import type { Journal } from "../../../packages/ledger/src/index.js";
 import type { RoundState } from "../../../packages/contracts/src/index.js";
 import { PacketProviderError, type PacketClaim, type PacketRecord, type PacketStore } from "./providers/packet-provider.js";
 import { telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
+import { encryptVerificationValue, maskTngAccount } from "./verification-security.js";
 
 const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 
@@ -33,6 +34,9 @@ export type UserRuntimeSnapshot = {
   onboarding: { deviceBound: boolean; referrerBound: boolean; pinSet: boolean };
   ledger: Array<{ id: string; reason: string; change: number; balanceAfter: number; createdAt: string }>;
 };
+export type VerificationStatus = "UNVERIFIED" | "PENDING" | "APPROVED" | "REJECTED";
+export type VerificationSnapshot = { status: VerificationStatus; submittedAt?: string; tngAccountLast4?: string; rejectionReason?: string };
+export type RoomMessage = { id: string; type: string; body: string; actor?: string; createdAt: string; payload: Record<string, unknown> };
 
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 
@@ -65,6 +69,51 @@ export class ApiPersistence implements PacketStore {
 
   async health(): Promise<"disabled" | "healthy" | "unavailable"> {
     return this.database.health();
+  }
+
+  async loadVerification(telegramUserId: string): Promise<VerificationSnapshot | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string; rejection_reason?: string | null }>(`SELECT iv.status, iv.submitted_at, iv.tng_account_last4, iv.rejection_reason
+      FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id WHERE ti.telegram_user_id = $1`, [telegramUserId]);
+    const row = rows[0];
+    return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : { status: "UNVERIFIED" };
+  }
+
+  async persistVerification(telegramUserId: string, legalName: string, tngAccountNo: string): Promise<VerificationSnapshot> {
+    if (!this.configured) throw new Error("DATABASE_REQUIRED: Verification requires persistent storage");
+    const rows = await this.database.transaction(async (client) => {
+      const existing = await client.query<{ status: VerificationStatus }>("SELECT iv.status FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id WHERE ti.telegram_user_id = $1 FOR UPDATE", [telegramUserId]);
+      if (existing.rows[0]?.status === "APPROVED") throw new Error("VERIFICATION_ALREADY_APPROVED");
+      return client.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string }>(`INSERT INTO identity_verifications (user_id, legal_name_ciphertext, tng_account_ciphertext, tng_account_last4, status, submitted_at, reviewed_by, reviewed_at, rejection_reason)
+        SELECT ti.user_id, $2, $3, $4, 'PENDING', now(), NULL, NULL, NULL FROM telegram_identities ti WHERE ti.telegram_user_id = $1
+        ON CONFLICT (user_id) DO UPDATE SET legal_name_ciphertext = EXCLUDED.legal_name_ciphertext, tng_account_ciphertext = EXCLUDED.tng_account_ciphertext,
+          tng_account_last4 = EXCLUDED.tng_account_last4, status = 'PENDING', submitted_at = now(), reviewed_by = NULL, reviewed_at = NULL, rejection_reason = NULL
+        RETURNING status, submitted_at, tng_account_last4`, [telegramUserId, encryptVerificationValue(legalName), encryptVerificationValue(tngAccountNo), tngAccountNo.slice(-4)]);
+    });
+    const row = rows.rows[0];
+    if (!row) throw new Error("Unable to persist verification");
+    return { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4) };
+  }
+
+  async reviewVerification(telegramUserId: string, status: "APPROVED" | "REJECTED", reviewedBy: string, rejectionReason?: string): Promise<VerificationSnapshot | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string; rejection_reason?: string | null }>(`UPDATE identity_verifications iv SET status = $2, reviewed_by = $3, reviewed_at = now(), rejection_reason = $4
+      FROM telegram_identities ti WHERE iv.user_id = ti.user_id AND ti.telegram_user_id = $1
+      RETURNING iv.status, iv.submitted_at, iv.tng_account_last4, iv.rejection_reason`, [telegramUserId, status, reviewedBy, rejectionReason ?? null]);
+    const row = rows[0];
+    return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : undefined;
+  }
+
+  async persistRoomMessage(input: { roundId?: string; userId?: string; type: string; body: string; payload?: Record<string, unknown> }): Promise<void> {
+    await this.run(() => this.database.query(`INSERT INTO room_messages (room_id, round_id, user_id, message_type, body, payload)
+      SELECT r.room_id, r.id, ti.user_id, $2, $3, $4::jsonb FROM rounds r LEFT JOIN telegram_identities ti ON ti.telegram_user_id = $5 WHERE r.id = $1`, [input.roundId ?? this.roundDatabaseId, input.type, input.body, JSON.stringify(input.payload ?? {}), input.userId ?? null]).then(() => undefined));
+  }
+
+  async loadRoomMessages(roundId?: string): Promise<RoomMessage[]> {
+    if (!this.configured) return [];
+    const rows = await this.database.query<{ id: string; message_type: string; body: string; display_name?: string | null; created_at: string | Date; payload: Record<string, unknown> }>(`SELECT rm.id::text AS id, rm.message_type, rm.body, u.display_name, rm.created_at, rm.payload
+      FROM room_messages rm LEFT JOIN users u ON u.id = rm.user_id WHERE rm.round_id = $1 ORDER BY rm.created_at ASC, rm.id ASC LIMIT 100`, [roundId ?? this.roundDatabaseId]);
+    return rows.map((row) => ({ id: row.id, type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {} }));
   }
 
   async loadUserRuntime(telegramUserId: string): Promise<UserRuntimeSnapshot | undefined> {

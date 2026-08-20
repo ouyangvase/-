@@ -12,7 +12,9 @@ test("player can complete the safe demo round path", async ({ page }) => {
   await page.getByLabel("再次输入").fill("258036");
   await page.getByRole("button", { name: /进入大厅/ }).click();
   await expect(page.getByRole("heading", { name: "游戏大厅" })).toBeVisible();
-  await page.getByRole("button", { name: /进入游戏：12牛牛玩法介绍/ }).click();
+  await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
+  await expect(page.getByRole("heading", { name: "当前游戏聊天室" })).toBeVisible();
+  await page.getByRole("button", { name: /继续当前回合/ }).click();
   await expect(page.getByRole("heading", { name: "R-0247" })).toBeVisible();
   await page.getByRole("button", { name: /按住确认抢庄/ }).click();
   await page.getByRole("button", { name: /按住锁定下注/ }).click();
