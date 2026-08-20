@@ -2,6 +2,27 @@
 
 Date: 2026-08-21
 
+## Goal branch audit: `goal/telegram-internal-chat-game`
+
+This branch supersedes the earlier mechanism-oriented direction. The authoritative target is now a Telegram Main Mini App whose product, wallet and realtime game all live inside the Mini App; Telegram Bot is limited to entry and private notifications, and the internal chat is not a Telegram native group.
+
+Safety state at start of this goal:
+
+- Backup branch created: `backup/pre-chat-game-goal` at the last verified commit.
+- Working branch created: `goal/telegram-internal-chat-game`.
+- Existing public staging URL preserved: `https://project-12-demo-staging-public.vercel.app`.
+- Working tree was clean before the branch operation.
+- No Telegram Bot token, Supabase service credential, or production database URL is present in the local `.env.local`.
+- The current app still reports Demo mode when those external services are absent; no real-money path is enabled.
+
+Current implementation gap for this goal:
+
+- The Mini App now has an authenticated internal chat feed with numeric banker/bet commands, `shN`, close-betting, SSE delivery and participant-only packet access; the UI is still a compact reference-derived implementation rather than a pixel copy of the supplied Telegram screenshots.
+- Existing round APIs and worker contain demo-safe primitives for bids, bets, packets, claims and settlement; the chat command parser and event persistence are implemented, while the production worker loop still needs external database credentials and deployment verification.
+- Six locale dictionaries are implemented (`zh-CN`, `en`, `ms`, `th`, `vi`, `id`), the Mini App stores the preference in local storage plus `user_profiles.locale`, and approval/packet Bot events carry a locale when produced by the API.
+- Supabase/Postgres migrations and adapters now include the locale constraint and `room_messages` Realtime publication preparation, but this workspace is not connected to the supplied Supabase project yet.
+- Gate A (real `/start` → Main Mini App → signed `initData` → persisted user → approval notification) cannot be proven until the owner supplies/configures the Bot token and database credentials.
+
 ## Delivered
 
 - The benchmark decks and supplied screenshots remain classified as source/benchmark evidence; they do not override the implementation request. The design system is persisted under `design-system/project-12/`.
@@ -14,7 +35,9 @@ Date: 2026-08-21
 - Postgres schema, forward migration, seed, optional API persistence adapter, outbox, long-lived SSE round stream, worker lock, admin risk/recovery/adjustment endpoints and seven-service Compose topology are present. Seed covers 20 demo users, two rooms, 30 historical rounds, four campaigns, three referral levels and eight banners.
 - Telegram device onboarding never stores a private key in the non-SecureStorage fallback; it retains only a public compatibility key and tells the user that rebinding may be required.
 - The Bot service now remains alive with `/health` and `/telegram/webhook`; it only calls Telegram when a token and webhook configuration are supplied.
-- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; deployment `dpl_69jaYxAk2EVE8j33HAYCeXDjAgJo` and `/api/health`, `/api/health/live`, `/api/health/ready` are verified production smoke checks. The current public runtime is explicitly Demo mode with real-money paths disabled.
+- The internal chat game path is implemented in Demo mode: verified users can send banker/bet amounts in the room, `shN` is accepted, `停止下注` creates an internal packet, and only recorded bettors receive packet eligibility. Spectators receive no claim entry point.
+- Locale preference is validated server-side, persisted for Telegram users, and used as the payload locale for verification approval notifications.
+- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_FmZc5M4ffxuFHKz62D69wHaBGeWt`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
 - Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker claims the outbox, writes heartbeats and advances safe expired round states with Postgres advisory locks. It is optional by default and is enforced only when `REQUIRE_WORKER=true`.
 - When `DATABASE_URL` is configured, Telegram sessions are resolved from hashed Postgres sessions after cold starts, player wallet/onboarding state is hydrated from Postgres, and internal packet claims use a row-locked persistent packet record (`006-persistent-internal-packets.sql`) instead of process memory.
 - Persisted round transitions now use an expected-state conditional update in Postgres; stale concurrent actions fail with `409 ROUND_STATE_CONFLICT` instead of overwriting the newer round state. `pnpm telegram:verify` checks Bot identity, webhook, Menu Button and commands without printing the Bot token.
@@ -30,8 +53,8 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 | Check | Result |
 |---|---|
-| `pnpm test` | 7 files, 42 passed |
-| `pnpm build` | Mini App, Admin, API, Worker and Bot passed |
+| `pnpm test` | 10 files, 48 passed |
+| `pnpm build` | Mini App, Admin, API, Worker and Bot passed after locale/chat changes |
 | `pnpm typecheck` / `pnpm lint` | passed; lint is intentionally the strict TypeScript gate in this small repo |
 | `pnpm test:e2e` | 13 passed: six responsive demo flows, six Telegram-runtime guard flows and one visual baseline; 5 duplicate visual projects skipped |
 | API smoke | passed: auth, HttpOnly cookie, idempotent bet replay, claim, two-decimal settlement (`playerCredit=2387.5`, Fee `112.5`), onboarding and `REAL_MONEY_DISABLED` guard |
@@ -41,10 +64,10 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 | Docker | `docker compose config` passed; runtime startup is not claimed because the local Docker Linux engine is unavailable |
 | Visual QA | 19 named screenshots captured at 390×844, including banker bidding, plus six responsive E2E viewports and a 1440×900 Admin capture |
 | React Doctor | design scan: no issues found |
-| Runtime smoke | Demo API auth → device → referral → runtime scrypt PIN → bet → claim → settlement passed; public Vercel `/api/health` and `/api/health/live` return 200 |
+| Runtime smoke | Demo API auth → device → referral → runtime scrypt PIN → bet → claim → settlement passed; public Vercel `/api/health` and `/api/health/live` return 200 after latest production deploy |
 
 ## External blocker: Telegram-connected staging
 
-The public Mini App/API is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret and a managed Supabase/Postgres connection; the current health response reports `bot: blocked`, `database: disabled`, and `mode: demo`. The supplied Supabase dashboard link is not an API credential and was not written to. The target `@onetwogaming_bot` is an external bot; it cannot be rewired to this project without the owner's BotFather token. The current workspace branch is `redesign/project-12-mechanism`; the verified implementation is pushed to GitHub after the next commit.
+The public Mini App/API is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret and a managed Supabase/Postgres connection; the current health response reports `bot: blocked`, `database: disabled`, and `mode: demo`. The supplied Supabase dashboard link is not an API credential and was not written to. The target `@onetwogaming_bot` is an external bot; it cannot be rewired to this project without the owner's BotFather token. The current workspace branch is `goal/telegram-internal-chat-game`; the verified implementation still needs a commit/push after the latest locale and chat changes.
 
 Until that bundle exists, keep `REAL_MONEY_ENABLED=false`, `TOP_UP_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, `CASH_REWARD_ENABLED=false`, `PACKET_PROVIDER=demo` and `TELEGRAM_MOCK_ENABLED=true`.

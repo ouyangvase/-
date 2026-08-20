@@ -239,15 +239,25 @@ export class ApiPersistence implements PacketStore {
     await this.run(() => this.database.query("INSERT INTO idempotency_keys (key, actor, result) VALUES ($1, $2, $3::jsonb) ON CONFLICT (key) DO NOTHING", [key, actor, JSON.stringify(result)]).then(() => undefined));
   }
 
-  async upsertTelegramIdentity(telegramUserId: string, username: string | undefined, verified: boolean): Promise<void> {
+  async upsertTelegramIdentity(telegramUserId: string, username: string | undefined, verified: boolean, locale = "zh-CN"): Promise<void> {
     await this.run(() => this.database.transaction(async (client) => {
       const user = await client.query<{ id: string }>("INSERT INTO users (internal_uid, display_name) VALUES ($1, $2) ON CONFLICT (internal_uid) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = now() RETURNING id", [`TG-${telegramUserId}`, username ? `@${username}` : `Telegram ${telegramUserId}`]);
       const userId = user.rows[0]?.id;
       if (!userId) throw new Error("Unable to persist Telegram user");
-      await client.query("INSERT INTO user_profiles (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", [userId]);
+      await client.query("INSERT INTO user_profiles (user_id, locale) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET locale = EXCLUDED.locale, updated_at = now()", [userId, locale]);
       await client.query("INSERT INTO wallet_accounts (user_id, account_type, balance) VALUES ($1, 'USER_AVAILABLE', 12500), ($1, 'USER_LOCKED', 0), ($1, 'USER_LOCKED_BANKER_POOL', 0) ON CONFLICT (user_id, account_type) DO NOTHING", [userId]);
       await client.query("INSERT INTO telegram_identities (user_id, telegram_user_id, username, init_data_verified_at) VALUES ($1, $2, $3, CASE WHEN $4 THEN now() ELSE NULL END) ON CONFLICT (telegram_user_id) DO UPDATE SET user_id = EXCLUDED.user_id, username = EXCLUDED.username, init_data_verified_at = CASE WHEN $4 THEN now() ELSE telegram_identities.init_data_verified_at END", [userId, telegramUserId, username ?? null, verified]);
     }));
+  }
+
+  async loadUserLocale(telegramUserId: string): Promise<string | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<{ locale: string }>("SELECT up.locale FROM user_profiles up JOIN telegram_identities ti ON ti.user_id = up.user_id WHERE ti.telegram_user_id = $1", [telegramUserId]);
+    return rows[0]?.locale;
+  }
+
+  async persistUserLocale(telegramUserId: string, locale: string): Promise<void> {
+    await this.run(() => this.database.query("UPDATE user_profiles up SET locale = $2, updated_at = now() FROM telegram_identities ti WHERE up.user_id = ti.user_id AND ti.telegram_user_id = $1", [telegramUserId, locale]).then(() => undefined));
   }
 
   async createSession(telegramUserId: string, token: string, expiresAt: Date): Promise<void> {

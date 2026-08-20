@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
+import { createTranslator, resolveLocale, type Locale } from "@project12/i18n";
 import { safeEqualText } from "../../../packages/telegram/src/index.js";
 
 type WebAppButton = { text: string; web_app: { url: string } };
@@ -22,7 +23,7 @@ export type BotCommand = { command: string; description: string };
 export type MenuButtonConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type MainMiniAppConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true; reply_markup?: InlineKeyboardMarkup };
-export type TelegramUpdate = { update_id?: number; message?: { chat?: { id?: string | number }; from?: { id?: string | number; username?: string }; text?: string } };
+export type TelegramUpdate = { update_id?: number; message?: { chat?: { id?: string | number }; from?: { id?: string | number; username?: string; language_code?: string }; text?: string } };
 
 const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
 const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAME ?? "project12_demo_bot";
@@ -46,36 +47,42 @@ export function buildMiniAppDeepLink(referralCode?: string): string {
   return `https://t.me/${botUsername}?startapp=${referralCode ? `ref_${encodeURIComponent(referralCode)}` : "hall"}`;
 }
 
-export function buildReplyKeyboard(startParam = "", launchToken?: string): TelegramReplyMarkup {
+function defaultLocale(): Locale {
+  return resolveLocale(process.env.TELEGRAM_DEFAULT_LOCALE, undefined, "zh-CN");
+}
+
+export function buildReplyKeyboard(startParam = "", launchToken?: string, locale = defaultLocale()): TelegramReplyMarkup {
   const referralUrl = new URL(miniAppUrl);
   if (startParam.startsWith("ref_")) referralUrl.searchParams.set("startapp", startParam);
   if (launchToken) referralUrl.searchParams.set("launch_token", launchToken);
   const webAppUrl = referralUrl.toString().replace(/\/(?=\?|$)/, "");
   return {
-    keyboard: [[{ text: "进入游戏大厅", web_app: { url: webAppUrl } }]],
+    keyboard: [[{ text: createTranslator(locale)("bot.open"), web_app: { url: webAppUrl } }]],
     resize_keyboard: true,
     is_persistent: true
   };
 }
 
-export function buildMenuButtonConfig(): MenuButtonConfig {
-  return { type: "web_app", text: "进入 PROJECT 12", web_app: { url: miniAppUrl } };
+export function buildMenuButtonConfig(locale = defaultLocale()): MenuButtonConfig {
+  return { type: "web_app", text: createTranslator(locale)("bot.open"), web_app: { url: miniAppUrl } };
 }
 
-export function buildMainMiniAppConfig(): MainMiniAppConfig {
-  return { type: "web_app", text: "打开 12牛牛", web_app: { url: miniAppUrl } };
+export function buildMainMiniAppConfig(locale = defaultLocale()): MainMiniAppConfig {
+  return { type: "web_app", text: createTranslator(locale)("bot.open"), web_app: { url: miniAppUrl } };
 }
 
-export function buildWelcomeMessage(chatId: string | number, startParam = "", launchToken?: string): BotMessage {
+export function buildWelcomeMessage(chatId: string | number, startParam = "", launchToken?: string, locale = defaultLocale()): BotMessage {
+  const t = createTranslator(locale);
   return {
     chat_id: chatId,
-    text: "欢迎来到 12牛牛\n\n点击下方按钮打开小程序进入游戏大厅。",
-    reply_markup: buildReplyKeyboard(startParam, launchToken)
+    text: t("bot.welcome"),
+    reply_markup: buildReplyKeyboard(startParam, launchToken, locale)
   };
 }
 
-export function buildRoundNotification(chatId: string | number, roundId: string, text: string): NotificationPayload {
-  return { chat_id: chatId, text: `PROJECT 12 · ${roundId}\n${text}\n\n仅限 Demo 积分，无现金价值。`, disable_web_page_preview: true };
+export function buildRoundNotification(chatId: string | number, roundId: string, text: string, locale = defaultLocale()): NotificationPayload {
+  const disclaimer = locale === "zh-CN" ? "仅限 Demo 积分，无现金价值。" : "Demo credits only; no cash value.";
+  return { chat_id: chatId, text: `PROJECT 12 · ${roundId}\n${text}\n\n${disclaimer}`, disable_web_page_preview: true };
 }
 
 function buildMiniAppUrl(params: Record<string, string>): string {
@@ -84,35 +91,40 @@ function buildMiniAppUrl(params: Record<string, string>): string {
   return url.toString();
 }
 
-export function buildVerificationApprovedNotification(chatId: string | number): NotificationPayload {
+export function buildVerificationApprovedNotification(chatId: string | number, locale = defaultLocale()): NotificationPayload {
+  const t = createTranslator(locale);
   return {
     chat_id: chatId,
-    text: "✅ 实名认证已通过\n\n现在可以正常使用钱包和消息功能了。\n请重新打开小程序，或点击右上角重新加载页面即可。",
+    text: `✅ ${t("bot.verificationApproved")}\n\n${locale === "zh-CN" ? "请重新打开小程序，或点击右上角重新加载页面即可。" : "Reopen the Mini App or reload it from the top-right menu."}`,
     disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: [[{ text: "重新打开小程序", web_app: { url: buildMiniAppUrl({ startapp: "hall" }) } }]] }
+    reply_markup: { inline_keyboard: [[{ text: t("bot.open"), web_app: { url: buildMiniAppUrl({ startapp: "hall" }) } }]] }
   };
 }
 
-export function buildPrivatePacketNotification(chatId: string | number, roundId: string, packetId: string, amount: number): NotificationPayload {
+export function buildPrivatePacketNotification(chatId: string | number, roundId: string, packetId: string, amount: number, locale = defaultLocale()): NotificationPayload {
+  const isChinese = locale === "zh-CN";
   return {
     chat_id: chatId,
-    text: `🧧 平台红包已发出\n回合 ${roundId}\n${amount} PT 内部积分已准备，请在有效时间内领取。\n\n这条消息只发送给本局已下注玩家。旁观者不会收到领取入口。\n仅限 Demo 积分，无现金价值。`,
+    text: isChinese
+      ? `🧧 平台红包已发出\n回合 ${roundId}\n${amount} PT 内部积分已准备，请在有效时间内领取。\n\n这条消息只发送给本局已下注玩家。旁观者不会收到领取入口。\n仅限 Demo 积分，无现金价值。`
+      : `🧧 The internal packet is ready\nRound ${roundId}\n${amount} PT is ready to claim before it expires.\n\nThis message is sent only to players who bet in this round. Spectators do not receive a claim entry.\nDemo credits only; no cash value.`,
     disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: [[{ text: "打开平台红包", web_app: { url: buildMiniAppUrl({ claim_round: roundId, packet: packetId }) } }]] }
+    reply_markup: { inline_keyboard: [[{ text: isChinese ? "打开平台红包" : "Open internal packet", web_app: { url: buildMiniAppUrl({ claim_round: roundId, packet: packetId }) } }]] }
   };
 }
 
-export function buildCommandMessage(chatId: string | number, command: string, startParam = "", launchToken?: string): BotMessage | NotificationPayload {
-  if (command === "/start" || command === "/play") return buildWelcomeMessage(chatId, startParam, launchToken);
+export function buildCommandMessage(chatId: string | number, command: string, startParam = "", launchToken?: string, locale = defaultLocale()): BotMessage | NotificationPayload {
+  const t = createTranslator(locale);
+  if (command === "/start" || command === "/play") return buildWelcomeMessage(chatId, startParam, launchToken, locale);
   const labels: Record<string, string> = {
-    "/wallet": "钱包页面会展示可用、冻结和不可提现的 Demo 积分。",
-    "/history": "回合历史以服务器事件和账本 Reference ID 为准。",
-    "/missions": "任务奖励仅进入 Demo 账户，不能兑换现金。",
-    "/referral": "邀请关系需要在 Mini App 内二次确认，绑定后不可自行更换。",
-    "/rules": "先确认规则版本和牌型示例，再进入游戏。",
-    "/support": "客服入口需要由部署者配置 support username。"
+    "/wallet": t("bot.wallet"),
+    "/history": t("bot.history"),
+    "/missions": t("bot.missions"),
+    "/referral": t("bot.referral"),
+    "/rules": t("bot.rules"),
+    "/support": t("bot.support")
   };
-  return buildRoundNotification(chatId, "BOT", labels[command] ?? "请使用 /start 打开 Mini App。");
+  return buildRoundNotification(chatId, "BOT", labels[command] ?? t("bot.fallback"), locale);
 }
 
 export async function sendBotApi(method: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -129,11 +141,11 @@ export async function configureBot(): Promise<void> {
   await sendBotApi("setChatMenuButton", { menu_button: buildMenuButtonConfig() });
 }
 
-export function handleMockUpdate(update: { message?: { chat?: { id?: string | number }; text?: string } }, launchToken?: string): BotMessage | NotificationPayload | null {
+export function handleMockUpdate(update: { message?: { chat?: { id?: string | number }; from?: { language_code?: string }; text?: string } }, launchToken?: string, locale?: Locale): BotMessage | NotificationPayload | null {
   const message = update.message;
   if (!message?.chat?.id || !message.text?.trim().startsWith("/")) return null;
   const [command, startParam = ""] = message.text.trim().split(/\s+/, 2);
-  return buildCommandMessage(message.chat.id, command, startParam, launchToken);
+  return buildCommandMessage(message.chat.id, command, startParam, launchToken, locale ?? resolveLocale(undefined, update.message?.from?.language_code, defaultLocale()));
 }
 
 export function handleTelegramUpdate(update: TelegramUpdate, options: { launchToken?: string } = {}): BotMessage | NotificationPayload | null {

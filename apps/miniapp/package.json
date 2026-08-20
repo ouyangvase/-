@@ -3,5 +3,5 @@
   "private": true,
   "type": "module",
   "scripts": { "dev": "vite --port 4173", "build": "vite build" },
-  "dependencies": { "@project12/config": "workspace:*", "@project12/contracts": "workspace:*", "@project12/game-engine": "workspace:*", "@project12/telegram": "workspace:*", "react": "^19.0.0", "react-dom": "^19.0.0" }
+  "dependencies": { "@project12/config": "workspace:*", "@project12/contracts": "workspace:*", "@project12/game-engine": "workspace:*", "@project12/i18n": "workspace:*", "@project12/telegram": "workspace:*", "react": "^19.0.0", "react-dom": "^19.0.0" }
 }

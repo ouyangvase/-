@@ -141,6 +141,14 @@ body { overflow-x: hidden; background: #000; }
 .room-message-type { color: var(--muted); font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: .08em; }
 .room-message p { margin-top: 7px; color: var(--bone); font-size: 13px; line-height: 1.45; }
 .room-message small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.chat-composer { display: grid; gap: 10px; position: sticky; bottom: calc(74px + var(--safe-bottom)); z-index: 4; margin: 6px -14px 0; padding: 12px 14px; border-top: 1px solid var(--hairline); background: rgba(17,18,21,.96); backdrop-filter: blur(14px); }
+.chat-command-row { display: flex; gap: 7px; overflow-x: auto; }
+.chat-command-row button { min-width: 58px; min-height: 34px; padding: 0 12px; border: 1px solid var(--steel-dark); border-radius: 999px; color: var(--bone); background: rgba(255,255,255,.06); font-size: 12px; }
+.chat-command-row button:disabled { opacity: .5; }
+.chat-input-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.chat-input-row .mechanism-input { min-height: 46px; border-radius: 999px; }
+.chat-send { min-height: 46px; padding: 0 16px; }
+.chat-packet-action { min-height: 40px; margin-top: 10px; padding: 0 16px; }
 .chat-game-cta { width: 100%; }
 .verification-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; align-items: end; padding: 18px; background: rgba(0,0,0,.72); }
 .verification-modal { width: min(100%, 398px); max-height: calc(100dvh - 36px); margin: 0 auto; overflow: auto; padding: 28px 20px 22px; border: 1px solid rgba(245,245,247,.2); border-radius: 24px; background: #1e1f24; box-shadow: 0 24px 80px rgba(0,0,0,.5); }
@@ -155,3 +163,20 @@ body { overflow-x: hidden; background: #000; }
 .verification-close { width: 100%; margin-top: 22px; }
 .verification-privacy { display: block; margin-top: 14px; color: var(--muted); font-size: 9px; line-height: 1.5; }
 .verification-modal .error-line { margin-top: 10px; }
+/* Mobile language picker */
+.settings-screen { gap: 18px; }
+.settings-language-card, .settings-note { border: 1px solid rgba(255,255,255,.11); background: rgba(255,255,255,.035); }
+.settings-language-card { padding: 22px 18px; }
+.settings-language-card h2 { margin: 8px 0 6px; font-size: 28px; }
+.settings-language-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+.language-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 20px; }
+.language-options button { position: relative; min-height: 58px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.1); color: var(--text); background: rgba(255,255,255,.025); text-align: left; }
+.language-options button.active { border-color: var(--signal-blue, #4b8cff); background: rgba(75,140,255,.14); }
+.language-options strong, .language-options span, .language-options small { display: block; }
+.language-options span { margin-top: 3px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, monospace; }
+.language-options small { position: absolute; top: 10px; right: 12px; color: var(--signal-blue, #4b8cff); font-size: 16px; }
+.settings-note { display: flex; gap: 12px; align-items: flex-start; padding: 16px; color: var(--muted); }
+.settings-note .icon { flex: 0 0 22px; color: var(--signal-blue, #4b8cff); }
+.settings-note strong, .settings-note small { display: block; }
+.settings-note strong { color: var(--text); }
+.settings-note small { margin-top: 5px; line-height: 1.5; }

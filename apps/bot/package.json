@@ -4,5 +4,5 @@
   "type": "module",
   "exports": { ".": "./src/bot.ts" },
   "scripts": { "dev": "tsx src/bot.ts", "start": "tsx src/bot.ts", "build": "tsc --noEmit" },
-  "dependencies": { "@project12/telegram": "workspace:*" }
+  "dependencies": { "@project12/i18n": "workspace:*", "@project12/telegram": "workspace:*" }
 }

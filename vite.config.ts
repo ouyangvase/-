@@ -9,6 +9,7 @@ export default defineConfig({
       "@project12/config": path.resolve(__dirname, "packages/config/src/branding.ts"),
       "@project12/contracts": path.resolve(__dirname, "packages/contracts/src/index.ts"),
       "@project12/game-engine": path.resolve(__dirname, "packages/game-engine/src/index.ts"),
+      "@project12/i18n": path.resolve(__dirname, "packages/i18n/src/index.ts"),
       "@project12/ledger": path.resolve(__dirname, "packages/ledger/src/index.ts"),
       "@project12/telegram": path.resolve(__dirname, "packages/telegram/src/index.ts")
     }
