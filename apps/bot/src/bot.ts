@@ -4,6 +4,7 @@ import { safeEqualText } from "../../../packages/telegram/src/index.js";
 
 type WebAppButton = { text: string; web_app: { url: string } };
 type InlineButton = { text: string; web_app?: { url: string }; callback_data?: string };
+type InlineKeyboardMarkup = { inline_keyboard: Array<Array<InlineButton>> };
 
 export type TelegramReplyMarkup = {
   keyboard: Array<Array<WebAppButton>>;
@@ -20,7 +21,7 @@ export type BotMessage = {
 export type BotCommand = { command: string; description: string };
 export type MenuButtonConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type MainMiniAppConfig = { type: "web_app"; text: string; web_app: { url: string } };
-export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true };
+export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true; reply_markup?: InlineKeyboardMarkup };
 export type TelegramUpdate = { update_id?: number; message?: { chat?: { id?: string | number }; from?: { id?: string | number; username?: string }; text?: string } };
 
 const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
@@ -75,6 +76,30 @@ export function buildWelcomeMessage(chatId: string | number, startParam = "", la
 
 export function buildRoundNotification(chatId: string | number, roundId: string, text: string): NotificationPayload {
   return { chat_id: chatId, text: `PROJECT 12 · ${roundId}\n${text}\n\n仅限 Demo 积分，无现金价值。`, disable_web_page_preview: true };
+}
+
+function buildMiniAppUrl(params: Record<string, string>): string {
+  const url = new URL(miniAppUrl);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
+}
+
+export function buildVerificationApprovedNotification(chatId: string | number): NotificationPayload {
+  return {
+    chat_id: chatId,
+    text: "✅ 实名认证已通过\n\n现在可以正常使用钱包和消息功能了。\n请重新打开小程序，或点击右上角重新加载页面即可。",
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: "重新打开小程序", web_app: { url: buildMiniAppUrl({ startapp: "hall" }) } }]] }
+  };
+}
+
+export function buildPrivatePacketNotification(chatId: string | number, roundId: string, packetId: string, amount: number): NotificationPayload {
+  return {
+    chat_id: chatId,
+    text: `🧧 平台红包已发出\n回合 ${roundId}\n${amount} PT 内部积分已准备，请在有效时间内领取。\n\n这条消息只发送给本局已下注玩家。旁观者不会收到领取入口。\n仅限 Demo 积分，无现金价值。`,
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: "打开平台红包", web_app: { url: buildMiniAppUrl({ claim_round: roundId, packet: packetId }) } }]] }
+  };
 }
 
 export function buildCommandMessage(chatId: string | number, command: string, startParam = "", launchToken?: string): BotMessage | NotificationPayload {

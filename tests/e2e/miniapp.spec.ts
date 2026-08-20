@@ -18,6 +18,7 @@ test("player can complete the safe demo round path", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "R-0247" })).toBeVisible();
   await page.getByRole("button", { name: /按住确认抢庄/ }).click();
   await page.getByRole("button", { name: /按住锁定下注/ }).click();
+  await page.getByRole("button", { name: /停止下注并发放平台红包/ }).click();
   await page.getByRole("button", { name: /打开平台红包/ }).click();
   await page.getByRole("button", { name: /按住查看结算/ }).click();
   await expect(page.getByRole("heading", { name: "WIN" })).toBeVisible();

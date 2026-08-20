@@ -138,9 +138,9 @@ export class ApiPersistence implements PacketStore {
     return { displayName: row.display_name, available: Number(row.available), locked: Number(row.locked), bankerPool: Number(row.banker_pool), onboarding: { deviceBound: row.device_bound, referrerBound: row.referrer_bound, pinSet: row.pin_set }, ledger: ledgerRows.map((entry) => ({ id: entry.id, reason: entry.reason, change: (entry.direction === "CREDIT" ? 1 : -1) * Number(entry.amount), balanceAfter: Number(entry.balance_after), createdAt: iso(entry.created_at) })) };
   }
 
-  async createInternalPacket(input: { roundId: string; amount: number; serverSeedHash?: string }): Promise<PacketRecord> {
+  async createInternalPacket(input: { roundId: string; amount: number; maxClaims?: number; serverSeedHash?: string }): Promise<PacketRecord> {
     if (!this.configured) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Persistent packet storage is not configured");
-    const maxClaims = Math.max(1, Math.min(8, input.amount));
+    const maxClaims = Math.max(1, Math.min(input.maxClaims ?? 8, input.amount));
     const rows = await this.database.query<PacketRow>(`INSERT INTO packet_records
       (round_id, provider, server_seed_hash, total_amount, max_claims, claimed_amount, claimed_count, expires_at)
       VALUES ($1, 'InternalPacketProvider', $2, $3, $4, 0, 0, now() + interval '45 seconds')
@@ -150,6 +150,13 @@ export class ApiPersistence implements PacketStore {
     const row = rows[0];
     if (!row) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Unable to create internal packet");
     return packetRecord(row, input.roundId);
+  }
+
+  async getInternalPacket(roundId: string): Promise<PacketRecord | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<PacketRow>(`SELECT id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at
+      FROM packet_records WHERE round_id = $1 ORDER BY created_at DESC LIMIT 1`, [this.roundDatabaseId]);
+    return rows[0] ? packetRecord(rows[0], roundId) : undefined;
   }
 
   async claimInternalPacket(input: { packetId: string; serverSeed: string; roundId: string; userId: string; claimSequence: number }): Promise<PacketClaim> {
@@ -343,6 +350,14 @@ export class ApiPersistence implements PacketStore {
 
   async persistBet(telegramUserId: string, amount: number): Promise<void> {
     await this.run(() => this.database.query("INSERT INTO bets (round_id, user_id, bet_sequence, amount) SELECT $1, ti.user_id, COALESCE((SELECT max(bet_sequence) + 1 FROM bets b WHERE b.round_id = $1 AND b.user_id = ti.user_id), 1), $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, bet_sequence) DO NOTHING", [this.roundDatabaseId, telegramUserId, amount]).then(() => undefined));
+  }
+
+  async listRoundBettors(): Promise<Array<{ userId: string; amount: number }>> {
+    if (!this.configured) return [];
+    const rows = await this.database.query<{ telegram_user_id: string; amount: string | number }>(`SELECT ti.telegram_user_id, SUM(b.amount) AS amount
+      FROM bets b JOIN telegram_identities ti ON ti.user_id = b.user_id
+      WHERE b.round_id = $1 GROUP BY ti.telegram_user_id ORDER BY MIN(b.created_at), MIN(b.id)`, [this.roundDatabaseId]);
+    return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount) }));
   }
 
   async persistPacket(provider: string, serverSeedHash: string, serverSeed?: string): Promise<void> {

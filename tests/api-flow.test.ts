@@ -56,6 +56,8 @@ describe("API round flow", () => {
     });
     expect(approve.status).toBe(200);
     expect((await request("/api/verification/status", { headers: session })).status).toBe(200);
+    const approvalOutbox = await request("/api/admin/outbox", { headers: { "x-demo-admin-token": "admin-demo-only" } });
+    expect((await approvalOutbox.json()).some((event: { type: string; payload: { telegramUserId?: string } }) => event.type === "IDENTITY_VERIFICATION_APPROVED" && event.payload.telegramUserId === "api-flow-user")).toBe(true);
     const rooms = await request("/api/rooms", { headers: session });
     expect(rooms.status).toBe(200);
     expect((await rooms.json())[0].roundId).toBe("R-0247");
@@ -73,15 +75,23 @@ describe("API round flow", () => {
 
     const bet = await write("/api/rounds/R-0247/bet", "api-flow-bet", { amount: 250 });
     expect(bet.status).toBe(200);
-    expect((await bet.json()).result.state).toBe("CLAIMING");
+    expect((await bet.json()).result.state).toBe("BETTING");
     const wallet = await request("/api/wallet", { headers: session });
     expect((await wallet.json()).locked).toBe(250);
     const chat = await request("/api/chat/room", { headers: session });
     expect(chat.status).toBe(200);
-    expect((await chat.json()).messages.some((message: { body: string }) => message.body.includes("下注 250 PT"))).toBe(true);
+    expect((await chat.json()).messages.some((message: { body: string }) => message.body.includes("下单 250 PT"))).toBe(true);
+    const close = await write("/api/rounds/R-0247/close-betting", "api-flow-close-betting");
+    expect(close.status).toBe(200);
+    expect((await close.json()).result.state).toBe("CLAIMING");
     const claim = await write("/api/rounds/R-0247/packet-claim", "api-flow-claim");
     expect(claim.status).toBe(200);
     expect((await claim.json()).result.hand.type).toBe("反顺");
+    const spectatorAuth = await request("/api/auth/telegram", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ demoUser: "api-flow-spectator" }) });
+    const spectatorBody = await spectatorAuth.json() as { token?: string };
+    const spectatorClaim = await request("/api/rounds/R-0247/packet-claim", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-flow-spectator-claim", "x-session-token": spectatorBody.token! }, body: "{}" });
+    expect(spectatorClaim.status).not.toBe(200);
+    expect((await spectatorClaim.json()).error).toContain("只有本局已下注玩家");
     const settle = await write("/api/rounds/R-0247/settle", "api-flow-settle");
     expect(settle.status).toBe(200);
     expect((await settle.json()).result.state).toBe("ROUND_COMPLETE");

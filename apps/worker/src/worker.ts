@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
+import { buildPrivatePacketNotification, buildRoundNotification, buildVerificationApprovedNotification, handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
 import { Project12Database, type QueryExecutor } from "@project12/database";
 import { createTelegramLaunchToken, telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
 import { advanceExpiredRounds } from "./round-advancer.js";
@@ -83,6 +83,35 @@ async function publishDatabaseOutbox(row: OutboxRow): Promise<void> {
       } else {
         await sendBotApi("sendMessage", response as unknown as Record<string, unknown>);
       }
+    }
+  }
+  if (row.event_type === "IDENTITY_VERIFICATION_APPROVED") {
+    const telegramUserId = String(row.payload.telegramUserId ?? "");
+    if (telegramUserId) {
+      if (!process.env.TELEGRAM_BOT_TOKEN) {
+        if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
+      } else await sendBotApi("sendMessage", buildVerificationApprovedNotification(telegramUserId) as unknown as Record<string, unknown>);
+    }
+  }
+  if (row.event_type === "ROUND_PACKET_AVAILABLE") {
+    const recipients = Array.isArray(row.payload.recipients) ? row.payload.recipients.map(String) : [];
+    const roundId = String(row.payload.roundId ?? "");
+    const packetId = String(row.payload.packetId ?? "");
+    const amount = Number(row.payload.amount ?? 0);
+    for (const telegramUserId of recipients) {
+      if (!process.env.TELEGRAM_BOT_TOKEN) {
+        if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
+      } else await sendBotApi("sendMessage", buildPrivatePacketNotification(telegramUserId, roundId, packetId, amount) as unknown as Record<string, unknown>);
+    }
+  }
+  if (row.event_type === "TELEGRAM_GROUP_ROOM_MESSAGE") {
+    const groupChatId = process.env.TELEGRAM_GAME_GROUP_CHAT_ID;
+    if (groupChatId) {
+      const roundId = String(row.payload.roundId ?? "");
+      const text = String(row.payload.body ?? "");
+      if (!process.env.TELEGRAM_BOT_TOKEN) {
+        if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
+      } else if (roundId && text) await sendBotApi("sendMessage", buildRoundNotification(groupChatId, roundId, text) as unknown as Record<string, unknown>);
     }
   }
   await database.query("UPDATE outbox_events SET published_at = now(), claimed_at = NULL, claimed_by = NULL, last_error = NULL WHERE id = $1", [row.id]);

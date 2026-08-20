@@ -6,7 +6,7 @@ loadEnvFile();
 const required = [
   "APP_MODE", "TELEGRAM_MOCK_ENABLED", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME",
   "DATABASE_URL", "DIRECT_URL", "TELEGRAM_WEBHOOK_SECRET", "SESSION_SECRET",
-  "TELEGRAM_WEBHOOK_URL", "TELEGRAM_MINI_APP_URL"
+  "TELEGRAM_WEBHOOK_URL", "TELEGRAM_MINI_APP_URL", "TELEGRAM_GAME_GROUP_CHAT_ID"
 ];
 const expectedCommands = ["start", "play", "wallet", "history", "missions", "referral", "rules", "support"];
 
