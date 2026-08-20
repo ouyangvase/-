@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { loadEnvFile } from "./load-env-file.mjs";
+
+loadEnvFile();
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://demo:demo@localhost:5432/project12";
 const seed = resolve("infra/seed.sql");

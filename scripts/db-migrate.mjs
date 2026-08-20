@@ -1,6 +1,9 @@
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { loadEnvFile } from "./load-env-file.mjs";
+
+loadEnvFile();
 
 const databaseUrl = process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "postgresql://demo:demo@localhost:5432/project12";
 const files = [resolve("infra/schema.sql"), ...readdirSync(resolve("infra/migrations")).filter((file) => file.endsWith(".sql")).sort().map((file) => resolve("infra/migrations", file))];

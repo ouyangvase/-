@@ -1,3 +1,7 @@
+import { loadEnvFile } from "./load-env-file.mjs";
+
+loadEnvFile();
+
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const expectedWebhook = process.env.TELEGRAM_WEBHOOK_URL;
 const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL;

@@ -9,6 +9,19 @@
 7. Run `pnpm telegram:verify` after `pnpm telegram:configure`; it checks the Bot identity, webhook URL, Menu Button URL and command list without printing the Bot token.
 8. Test only with demo credits and verify the health endpoint before opening the app.
 
+For a local operator shell, pull the authorized Vercel environment without printing its values, then run the checks from the repository root:
+
+```bash
+npx vercel env pull .env.staging.local production
+pnpm db:migrate
+pnpm db:seed
+pnpm telegram:configure
+pnpm telegram:verify
+pnpm staging:preflight
+```
+
+`.env.staging.local` is ignored by Git. The scripts load it automatically and never echo its secrets.
+
 The Vercel webhook handles `/start` replies and retry-safe delivery directly. Set `REQUIRE_WORKER=true` only when you deploy the long-running Worker for background outbox notifications; it is not required for the Bot → Mini App launch path.
 
 The API uses the `pg` driver directly against Supabase Postgres; it does not use Supabase REST, the Supabase client SDK or Supabase Realtime. Use `DATABASE_URL` for the serverless API/Worker and `DIRECT_URL` for migrations when the provider exposes separate pooler and direct connection strings. No Supabase secret key belongs in the Mini App bundle.

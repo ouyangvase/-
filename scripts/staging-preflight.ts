@@ -1,4 +1,7 @@
+import { loadEnvFile } from "./load-env-file.mjs";
 import { Project12Database } from "../packages/database/src/index.js";
+
+loadEnvFile();
 
 const required = [
   "APP_MODE", "TELEGRAM_MOCK_ENABLED", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME",
