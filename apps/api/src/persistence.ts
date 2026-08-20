@@ -294,7 +294,8 @@ export class ApiPersistence implements PacketStore {
 
   async persistRoundEvent(event: RoundEventInput): Promise<void> {
     await this.run(() => this.database.transaction(async (client) => {
-      await client.query("UPDATE rounds SET state = $2, state_started_at = now(), state_version = state_version + 1 WHERE id = $1", [this.roundDatabaseId, event.to]);
+      const updated = await client.query<{ id: string }>("UPDATE rounds SET state = $2, state_started_at = now(), state_version = state_version + 1 WHERE id = $1 AND ($3::text IS NULL OR state = $3) RETURNING id", [this.roundDatabaseId, event.to, event.from ?? null]);
+      if (!updated.rows[0]) throw new Error(`ROUND_STATE_CONFLICT: expected ${event.from ?? "current"}`);
       await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [this.roundDatabaseId, event.from ?? null, event.to, JSON.stringify(event.payload), event.actor]);
     }));
   }
