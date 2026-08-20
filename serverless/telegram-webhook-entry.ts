@@ -45,15 +45,25 @@ export default async function handler(request: IncomingMessage, response: Server
     if (updateType === "unknown") return writeJson(response, 200, { ok: true, ignored: true, updateId });
 
     const persistence = new ApiPersistence();
-    const inserted = await persistence.enqueueTelegramUpdate(updateId, updateType, update);
-    const stored = inserted ? { payload: update, published: false } : await persistence.getTelegramUpdate(updateId);
-    if (!stored) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
-    if (stored.published) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
-    const launchToken = await prepareLaunchToken(persistence, updateId, stored.payload as TelegramUpdate);
-    const reply = handleTelegramUpdate(stored.payload as TelegramUpdate, { launchToken });
-    if (reply) await sendBotApi("sendMessage", reply as unknown as Record<string, unknown>);
-    await persistence.markTelegramUpdatePublished(updateId);
-    return writeJson(response, 200, { ok: true, accepted: true, updateId, updateType, replied: Boolean(reply), retried: !inserted });
+    let claimedBy: string | undefined;
+    try {
+      const inserted = await persistence.enqueueTelegramUpdate(updateId, updateType, update);
+      const stored = inserted ? { payload: update, published: false } : await persistence.getTelegramUpdate(updateId);
+      if (!stored) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
+      if (stored.published) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
+      claimedBy = `webhook:${updateId}`;
+      if (!await persistence.claimTelegramUpdate(updateId, claimedBy)) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
+      const launchToken = await prepareLaunchToken(persistence, updateId, stored.payload as TelegramUpdate);
+      const reply = handleTelegramUpdate(stored.payload as TelegramUpdate, { launchToken });
+      if (reply) await sendBotApi("sendMessage", reply as unknown as Record<string, unknown>);
+      await persistence.markTelegramUpdatePublished(updateId);
+      return writeJson(response, 200, { ok: true, accepted: true, updateId, updateType, replied: Boolean(reply), retried: !inserted });
+    } catch (error) {
+      if (claimedBy) await persistence.releaseTelegramUpdate(updateId, claimedBy, error);
+      throw error;
+    } finally {
+      await persistence.close();
+    }
   } catch (error) {
     return writeJson(response, 400, { error: error instanceof Error ? error.message : "Webhook failed" });
   }

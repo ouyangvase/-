@@ -240,6 +240,21 @@ export class ApiPersistence implements PacketStore {
     await this.run(() => this.database.query("UPDATE outbox_events SET published_at = COALESCE(published_at, now()), claimed_at = NULL, claimed_by = NULL, last_error = NULL WHERE event_type = 'TELEGRAM_UPDATE_RECEIVED' AND payload->>'updateId' = $1", [String(updateId)]).then(() => undefined));
   }
 
+  async claimTelegramUpdate(updateId: number, claimedBy: string): Promise<boolean> {
+    if (!this.configured) return !this.strict;
+    const rows = await this.database.query<{ id: string }>(`UPDATE outbox_events SET claimed_at = now(), claimed_by = $2, attempt_count = attempt_count + 1
+      WHERE event_type = 'TELEGRAM_UPDATE_RECEIVED' AND payload->>'updateId' = $1 AND published_at IS NULL
+        AND (claimed_at IS NULL OR claimed_at < now() - interval '60 seconds') RETURNING id`, [String(updateId), claimedBy]);
+    return Boolean(rows[0]);
+  }
+
+  async releaseTelegramUpdate(updateId: number, claimedBy: string, error?: unknown): Promise<void> {
+    if (!this.configured) return;
+    const message = error instanceof Error ? error.message : undefined;
+    await this.database.query(`UPDATE outbox_events SET claimed_at = NULL, claimed_by = NULL, last_error = $3
+      WHERE event_type = 'TELEGRAM_UPDATE_RECEIVED' AND payload->>'updateId' = $1 AND claimed_by = $2 AND published_at IS NULL`, [String(updateId), claimedBy, message?.slice(0, 500) ?? null]);
+  }
+
   async persistWorkerHeartbeat(workerId: string, status = "healthy"): Promise<void> {
     if (!this.configured) {
       if (this.strict) throw new Error("DATABASE_REQUIRED: Worker heartbeat requires persistent storage");
