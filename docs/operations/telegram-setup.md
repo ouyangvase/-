@@ -12,7 +12,7 @@
 For a local operator shell, pull the authorized Vercel environment without printing its values, then run the checks from the repository root:
 
 ```bash
-npx vercel env pull .env.staging.local production
+npx vercel env pull .env.staging.local --environment production
 pnpm db:migrate
 pnpm db:seed
 pnpm telegram:configure
