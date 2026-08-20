@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
 import { Project12Database, type QueryExecutor } from "@project12/database";
 import { createTelegramLaunchToken, telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
+import { advanceExpiredRounds } from "./round-advancer.js";
 
 type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "PACKET_SENT" | "CLAIMING" | "EVALUATING" | "SETTLING" | "ROUND_COMPLETE" | "ROUND_CANCELLED" | "REFUNDING" | "REFUNDED" | "DISPUTED";
 
@@ -107,12 +108,18 @@ async function pollOutbox(): Promise<void> {
   }
 }
 
+async function pollRounds(): Promise<void> {
+  const advanced = await advanceExpiredRounds(database, workerId);
+  if (advanced > 0) console.log(JSON.stringify({ service: "worker", action: "rounds_advanced", count: advanced, worker_id: workerId }));
+}
+
 export async function startWorker(): Promise<void> {
   if (appMode !== "demo" && !database.configured) throw new Error("DATABASE_REQUIRED: Worker cannot start outside demo without DATABASE_URL");
   await writeHeartbeat();
+  await pollRounds();
   console.log(JSON.stringify({ service: "worker", mode: appMode, status: database.configured ? "ready" : "MOCK_ONLY", worker_id: workerId }));
   const heartbeatTimer = setInterval(() => { void writeHeartbeat().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "heartbeat_failed", error: error instanceof Error ? error.message : "unknown" }))); }, heartbeatIntervalMs);
-  const pollTimer = setInterval(() => { void pollOutbox().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
+  const pollTimer = setInterval(() => { void Promise.all([pollOutbox(), pollRounds()]).catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
   const stop = () => { clearInterval(heartbeatTimer); clearInterval(pollTimer); void database.close(); };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);

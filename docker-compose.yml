@@ -66,7 +66,13 @@ services:
     depends_on: [api]
   worker:
     build: { context: ., dockerfile: infra/docker/worker.Dockerfile }
-    environment: { APP_MODE: demo }
+    environment:
+      APP_MODE: demo
+      DATABASE_URL: postgresql://demo:demo@postgres:5432/project12
+      REDIS_URL: redis://redis:6379
+      REAL_MONEY_ENABLED: "false"
+      PACKET_PROVIDER: demo
+      TNG_INTEGRATION: disabled
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

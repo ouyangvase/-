@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advanceDemoRound, claimUnpublishedOutbox, withAdvisoryLock } from "../apps/worker/src/worker";
+import { nextTimedState } from "../apps/worker/src/round-advancer";
 
 describe("Worker runtime primitives", () => {
   it("claims each in-memory outbox event once", () => {
@@ -15,5 +16,11 @@ describe("Worker runtime primitives", () => {
   it("keeps demo round transitions monotonic", () => {
     expect(advanceDemoRound("R-0247", "CLAIMING")).toBe("CLAIMING");
     expect(advanceDemoRound("R-0247", "BETTING")).toBe("CLAIMING");
+  });
+
+  it("maps only safe deadline-driven states to the next durable state", () => {
+    expect(nextTimedState("PACKET_SENT")).toBe("CLAIMING");
+    expect(nextTimedState("CLAIMING")).toBe("EVALUATING");
+    expect(nextTimedState("BANKER_BIDDING")).toBeUndefined();
   });
 });

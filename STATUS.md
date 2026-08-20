@@ -15,7 +15,7 @@ Date: 2026-08-21
 - Telegram device onboarding never stores a private key in the non-SecureStorage fallback; it retains only a public compatibility key and tells the user that rebinding may be required.
 - The Bot service now remains alive with `/health` and `/telegram/webhook`; it only calls Telegram when a token and webhook configuration are supplied.
 - The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; deployment `dpl_7dJf7ayVrnzqEL7KxYWBk2W6NPA8` and `/api/health`, `/api/health/live`, `/api/health/ready` are verified production smoke checks. The current public runtime is explicitly Demo mode with real-money paths disabled.
-- Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker is optional by default and is enforced only when `REQUIRE_WORKER=true`.
+- Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker claims the outbox, writes heartbeats and advances safe expired round states with Postgres advisory locks. It is optional by default and is enforced only when `REQUIRE_WORKER=true`.
 - When `DATABASE_URL` is configured, Telegram sessions are resolved from hashed Postgres sessions after cold starts, player wallet/onboarding state is hydrated from Postgres, and internal packet claims use a row-locked persistent packet record (`006-persistent-internal-packets.sql`) instead of process memory.
 - Persisted round transitions now use an expected-state conditional update in Postgres; stale concurrent actions fail with `409 ROUND_STATE_CONFLICT` instead of overwriting the newer round state. `pnpm telegram:verify` checks Bot identity, webhook, Menu Button and commands without printing the Bot token.
 - Authenticated production requests use an isolated async runtime for the user snapshot and balance view; wallet ledger rows are rehydrated from the user's persisted `USER_AVAILABLE` journal lines instead of sharing the demo process state.
@@ -30,7 +30,7 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 | Check | Result |
 |---|---|
-| `pnpm test` | 7 files, 41 passed |
+| `pnpm test` | 7 files, 42 passed |
 | `pnpm build` | Mini App, Admin, API, Worker and Bot passed |
 | `pnpm typecheck` / `pnpm lint` | passed; lint is intentionally the strict TypeScript gate in this small repo |
 | `pnpm test:e2e` | 13 passed: six responsive demo flows, six Telegram-runtime guard flows and one visual baseline; 5 duplicate visual projects skipped |

@@ -38,7 +38,17 @@ export class Project12Database {
 
   async health(): Promise<"disabled" | "healthy" | "unavailable"> {
     if (!this.pool) return "disabled";
-    try { await this.pool.query("SELECT 1"); return "healthy"; } catch { return "unavailable"; }
+    try {
+      const result = await this.pool.query<{ ready: boolean }>(`SELECT
+        to_regclass('public.users') IS NOT NULL
+        AND to_regclass('public.telegram_identities') IS NOT NULL
+        AND to_regclass('public.rounds') IS NOT NULL
+        AND to_regclass('public.ledger_journals') IS NOT NULL
+        AND to_regclass('public.outbox_events') IS NOT NULL
+        AND to_regclass('public.telegram_launch_grants') IS NOT NULL
+        AND to_regclass('public.worker_heartbeats') IS NOT NULL AS ready`);
+      return result.rows[0]?.ready ? "healthy" : "unavailable";
+    } catch { return "unavailable"; }
   }
 
   async close(): Promise<void> {
