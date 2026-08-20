@@ -195,6 +195,11 @@ CREATE TABLE IF NOT EXISTS telegram_updates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), update_id bigint NOT NULL UNIQUE, update_type text NOT NULL,
   payload jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS telegram_launch_grants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), update_id bigint NOT NULL UNIQUE,
+  telegram_user_id text NOT NULL, chat_id text NOT NULL, token_hash text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL, used_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS worker_heartbeats (
   worker_id text PRIMARY KEY, status text NOT NULL, heartbeat_at timestamptz NOT NULL DEFAULT now()
 );

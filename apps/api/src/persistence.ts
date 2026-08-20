@@ -4,6 +4,7 @@ import { demoPacketValue } from "../../../packages/game-engine/src/index.js";
 import type { Journal } from "../../../packages/ledger/src/index.js";
 import type { RoundState } from "../../../packages/contracts/src/index.js";
 import { PacketProviderError, type PacketClaim, type PacketRecord, type PacketStore } from "./providers/packet-provider.js";
+import { telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
 
 const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 
@@ -299,6 +300,29 @@ export class ApiPersistence implements PacketStore {
 
   async persistSettlement(telegramUserId: string, settlementType: string): Promise<void> {
     await this.run(() => this.database.query("INSERT INTO settlements (round_id, user_id, settlement_type, status) SELECT $1, ti.user_id, $3, 'POSTED' FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, settlement_type) DO UPDATE SET status = 'POSTED'", [this.roundDatabaseId, telegramUserId, settlementType]).then(() => undefined));
+  }
+
+  async createWebAppLaunchGrant(input: { updateId: number; telegramUserId: string; chatId: string; token: string; expiresAt: Date }): Promise<void> {
+    if (!this.configured) {
+      if (this.strict) throw new Error("DATABASE_REQUIRED: Web App launch grants require persistent storage");
+      return;
+    }
+    await this.database.query(`INSERT INTO telegram_launch_grants (update_id, telegram_user_id, chat_id, token_hash, expires_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (update_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at
+      WHERE telegram_launch_grants.used_at IS NULL`, [input.updateId, input.telegramUserId, input.chatId, telegramLaunchTokenHash(input.token), input.expiresAt]);
+  }
+
+  async consumeWebAppLaunchGrant(token: string): Promise<string | undefined> {
+    if (!this.configured) return undefined;
+    return this.database.transaction(async (client) => {
+      const rows = await client.query<{ telegram_user_id: string }>(`SELECT telegram_user_id FROM telegram_launch_grants
+        WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`, [telegramLaunchTokenHash(token)]);
+      const row = rows.rows[0];
+      if (!row) return undefined;
+      await client.query("UPDATE telegram_launch_grants SET used_at = now() WHERE token_hash = $1", [telegramLaunchTokenHash(token)]);
+      return row.telegram_user_id;
+    });
   }
 
   async persistRoundEvent(event: RoundEventInput): Promise<void> {

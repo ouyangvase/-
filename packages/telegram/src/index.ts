@@ -16,13 +16,21 @@ export function validateTelegramInitData(initData: string, botToken: string, max
   if (!params.get("query_id") || !receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
   params.delete("hash");
   const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
-  const secret = createHash("sha256").update(botToken).digest();
+  const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
   const calculated = createHmac("sha256", secret).update(dataCheckString).digest("hex");
   if (!safeEqualText(calculated, receivedHash)) throw new Error("Telegram initData signature mismatch");
   const user = JSON.parse(params.get("user") ?? "{}");
   if (!user.id) throw new Error("Telegram user identity missing");
   return { userId: String(user.id), username: user.username };
 }
+
+export function createTelegramLaunchToken(updateId: number, telegramUserId: string, expiresAt: number, secret = process.env.SESSION_SECRET ?? "project12-demo-session-fallback"): string {
+  const payload = Buffer.from(JSON.stringify({ updateId, telegramUserId, expiresAt }), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+export function telegramLaunchTokenHash(token: string): string { return createHash("sha256").update(token).digest("hex"); }
 
 export function demoBotResponse(): { status: "MOCK_ONLY"; message: string } {
   return { status: "MOCK_ONLY", message: "Bot adapter is disabled until a user-supplied Bot token is configured." };

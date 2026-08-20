@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
 import { Project12Database, type QueryExecutor } from "@project12/database";
+import { createTelegramLaunchToken, telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
 
 type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "PACKET_SENT" | "CLAIMING" | "EVALUATING" | "SETTLING" | "ROUND_COMPLETE" | "ROUND_CANCELLED" | "REFUNDING" | "REFUNDED" | "DISPUTED";
 
@@ -40,6 +41,26 @@ export function advanceDemoRound(roundId: string, target: DemoRoundState): DemoR
 
 type OutboxRow = { id: string; event_type: string; payload: Record<string, unknown> };
 
+function isLaunchCommand(update: TelegramUpdate): boolean {
+  const command = update.message?.text?.trim().split(/\s+/, 1)[0]?.split("@", 1)[0];
+  return command === "/start" || command === "/play";
+}
+
+async function prepareLaunchToken(updateId: number, update: TelegramUpdate): Promise<string | undefined> {
+  const telegramUserId = update.message?.from?.id;
+  const chatId = update.message?.chat?.id;
+  if (!isLaunchCommand(update) || telegramUserId === undefined || chatId === undefined) return undefined;
+  const expiresAtSeconds = (Math.floor(Date.now() / 300_000) + 1) * 300;
+  const token = createTelegramLaunchToken(updateId, String(telegramUserId), expiresAtSeconds * 1000);
+  if (database.configured) {
+    await database.query(`INSERT INTO telegram_launch_grants (update_id, telegram_user_id, chat_id, token_hash, expires_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (update_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at
+      WHERE telegram_launch_grants.used_at IS NULL`, [updateId, String(telegramUserId), String(chatId), telegramLaunchTokenHash(token), new Date(expiresAtSeconds * 1000)]);
+  }
+  return token;
+}
+
 async function claimDatabaseOutbox(limit = 50): Promise<OutboxRow[]> {
   if (!database.configured) return [];
   return database.transaction(async (client: QueryExecutor) => {
@@ -52,7 +73,9 @@ async function claimDatabaseOutbox(limit = 50): Promise<OutboxRow[]> {
 async function publishDatabaseOutbox(row: OutboxRow): Promise<void> {
   if (row.event_type === "TELEGRAM_UPDATE_RECEIVED") {
     const update = row.payload.update as TelegramUpdate | undefined;
-    const response = update ? handleTelegramUpdate(update) : null;
+    const updateId = Number(row.payload.updateId);
+    const launchToken = update && Number.isFinite(updateId) ? await prepareLaunchToken(updateId, update) : undefined;
+    const response = update ? handleTelegramUpdate(update, { launchToken }) : null;
     if (response) {
       if (!process.env.TELEGRAM_BOT_TOKEN) {
         if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { safeEqualText } from "../packages/telegram/src/index.js";
+import { createTelegramLaunchToken, safeEqualText } from "../packages/telegram/src/index.js";
 import { ApiPersistence } from "../apps/api/src/persistence.js";
 import { handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "../apps/bot/src/bot.js";
 
@@ -12,6 +12,21 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
 function writeJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
+}
+
+function launchCommand(update: TelegramUpdate): boolean {
+  const command = update.message?.text?.trim().split(/\s+/, 1)[0]?.split("@", 1)[0];
+  return command === "/start" || command === "/play";
+}
+
+async function prepareLaunchToken(persistence: ApiPersistence, updateId: number, update: TelegramUpdate): Promise<string | undefined> {
+  const userId = update.message?.from?.id;
+  const chatId = update.message?.chat?.id;
+  if (!launchCommand(update) || userId === undefined || chatId === undefined) return undefined;
+  const expiresAtSeconds = (Math.floor(Date.now() / 300_000) + 1) * 300;
+  const token = createTelegramLaunchToken(updateId, String(userId), expiresAtSeconds * 1000);
+  await persistence.createWebAppLaunchGrant({ updateId, telegramUserId: String(userId), chatId: String(chatId), token, expiresAt: new Date(expiresAtSeconds * 1000) });
+  return token;
 }
 
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -34,7 +49,8 @@ export default async function handler(request: IncomingMessage, response: Server
     const stored = inserted ? { payload: update, published: false } : await persistence.getTelegramUpdate(updateId);
     if (!stored) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
     if (stored.published) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
-    const reply = handleTelegramUpdate(stored.payload as TelegramUpdate);
+    const launchToken = await prepareLaunchToken(persistence, updateId, stored.payload as TelegramUpdate);
+    const reply = handleTelegramUpdate(stored.payload as TelegramUpdate, { launchToken });
     if (reply) await sendBotApi("sendMessage", reply as unknown as Record<string, unknown>);
     await persistence.markTelegramUpdatePublished(updateId);
     return writeJson(response, 200, { ok: true, accepted: true, updateId, updateType, replied: Boolean(reply), retried: !inserted });

@@ -21,7 +21,7 @@ export type BotCommand = { command: string; description: string };
 export type MenuButtonConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type MainMiniAppConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true };
-export type TelegramUpdate = { message?: { chat?: { id?: string | number }; text?: string } };
+export type TelegramUpdate = { update_id?: number; message?: { chat?: { id?: string | number }; from?: { id?: string | number; username?: string }; text?: string } };
 
 const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
 const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAME ?? "project12_demo_bot";
@@ -45,10 +45,13 @@ export function buildMiniAppDeepLink(referralCode?: string): string {
   return `https://t.me/${botUsername}?startapp=${referralCode ? `ref_${encodeURIComponent(referralCode)}` : "hall"}`;
 }
 
-export function buildReplyKeyboard(startParam = ""): TelegramReplyMarkup {
-  const referral = startParam.startsWith("ref_") ? `${miniAppUrl}${miniAppUrl.includes("?") ? "&" : "?"}startapp=${encodeURIComponent(startParam)}` : miniAppUrl;
+export function buildReplyKeyboard(startParam = "", launchToken?: string): TelegramReplyMarkup {
+  const referralUrl = new URL(miniAppUrl);
+  if (startParam.startsWith("ref_")) referralUrl.searchParams.set("startapp", startParam);
+  if (launchToken) referralUrl.searchParams.set("launch_token", launchToken);
+  const webAppUrl = referralUrl.toString().replace(/\/(?=\?|$)/, "");
   return {
-    keyboard: [[{ text: "进入游戏大厅", web_app: { url: referral } }]],
+    keyboard: [[{ text: "进入游戏大厅", web_app: { url: webAppUrl } }]],
     resize_keyboard: true,
     is_persistent: true
   };
@@ -62,11 +65,11 @@ export function buildMainMiniAppConfig(): MainMiniAppConfig {
   return { type: "web_app", text: "打开 12牛牛", web_app: { url: miniAppUrl } };
 }
 
-export function buildWelcomeMessage(chatId: string | number, startParam = ""): BotMessage {
+export function buildWelcomeMessage(chatId: string | number, startParam = "", launchToken?: string): BotMessage {
   return {
     chat_id: chatId,
     text: "欢迎来到 12牛牛\n\n点击下方按钮打开小程序进入游戏大厅。",
-    reply_markup: buildReplyKeyboard(startParam)
+    reply_markup: buildReplyKeyboard(startParam, launchToken)
   };
 }
 
@@ -74,8 +77,8 @@ export function buildRoundNotification(chatId: string | number, roundId: string,
   return { chat_id: chatId, text: `PROJECT 12 · ${roundId}\n${text}\n\n仅限 Demo 积分，无现金价值。`, disable_web_page_preview: true };
 }
 
-export function buildCommandMessage(chatId: string | number, command: string, startParam = ""): BotMessage | NotificationPayload {
-  if (command === "/start" || command === "/play") return buildWelcomeMessage(chatId, startParam);
+export function buildCommandMessage(chatId: string | number, command: string, startParam = "", launchToken?: string): BotMessage | NotificationPayload {
+  if (command === "/start" || command === "/play") return buildWelcomeMessage(chatId, startParam, launchToken);
   const labels: Record<string, string> = {
     "/wallet": "钱包页面会展示可用、冻结和不可提现的 Demo 积分。",
     "/history": "回合历史以服务器事件和账本 Reference ID 为准。",
@@ -101,15 +104,15 @@ export async function configureBot(): Promise<void> {
   await sendBotApi("setChatMenuButton", { menu_button: buildMenuButtonConfig() });
 }
 
-export function handleMockUpdate(update: { message?: { chat?: { id?: string | number }; text?: string } }): BotMessage | NotificationPayload | null {
+export function handleMockUpdate(update: { message?: { chat?: { id?: string | number }; text?: string } }, launchToken?: string): BotMessage | NotificationPayload | null {
   const message = update.message;
   if (!message?.chat?.id || !message.text?.trim().startsWith("/")) return null;
   const [command, startParam = ""] = message.text.trim().split(/\s+/, 2);
-  return buildCommandMessage(message.chat.id, command, startParam);
+  return buildCommandMessage(message.chat.id, command, startParam, launchToken);
 }
 
-export function handleTelegramUpdate(update: TelegramUpdate): BotMessage | NotificationPayload | null {
-  return handleMockUpdate(update);
+export function handleTelegramUpdate(update: TelegramUpdate, options: { launchToken?: string } = {}): BotMessage | NotificationPayload | null {
+  return handleMockUpdate(update, options.launchToken);
 }
 
 function writeJson(response: ServerResponse, status: number, payload: unknown): void {
