@@ -14,3 +14,5 @@ The Vercel webhook handles `/start` replies and retry-safe delivery directly. Se
 The API uses the `pg` driver directly against Supabase Postgres; it does not use Supabase REST, the Supabase client SDK or Supabase Realtime. Use `DATABASE_URL` for the serverless API/Worker and `DIRECT_URL` for migrations when the provider exposes separate pooler and direct connection strings. No Supabase secret key belongs in the Mini App bundle.
 
 The repository currently uses mock Telegram authentication only when `APP_MODE=demo` and `TELEGRAM_MOCK_ENABLED=true`. Outside demo, `/api/auth/telegram` accepts either fresh signed `initData` or a short-lived, one-time launch grant issued by the webhook for reply-keyboard `/start` launches. Never put the Bot token in client-side environment variables.
+
+After loading the authorized staging environment, run `pnpm staging:preflight`. It checks only boolean/structural results: required variable names, Project 12 schema readiness, Bot identity, webhook URL, Menu Button URL, commands and public API health. It never prints token, password, webhook secret, connection string or full `initData`.

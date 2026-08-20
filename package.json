@@ -17,6 +17,7 @@
     "demo:load": "tsx scripts/load-demo.ts",
     "telegram:configure": "node scripts/configure-telegram.mjs",
     "telegram:verify": "node scripts/verify-telegram.mjs",
+    "staging:preflight": "tsx scripts/staging-preflight.ts",
     "vercel:build": "pnpm --filter @project12/miniapp build && node scripts/bundle-vercel-functions.mjs"
   },
   "devDependencies": {
