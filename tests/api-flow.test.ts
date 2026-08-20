@@ -32,6 +32,9 @@ describe("API round flow", () => {
     const authBody = await auth.json() as { token?: string };
     expect(authBody.token).toBeTruthy();
     const session = { "x-session-token": authBody.token! };
+    const rooms = await request("/api/rooms", { headers: session });
+    expect(rooms.status).toBe(200);
+    expect((await rooms.json())[0].roundId).toBe("R-0247");
     const write = (path: string, key: string, body: Record<string, unknown> = {}) => request(path, {
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": key, ...session },
