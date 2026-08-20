@@ -1,11 +1,11 @@
 # Staging
 
-## Current static staging
+## Current public staging
 
-- Mini App production alias: `https://project-12-demo-staging-public.vercel.app` (latest verified deployment `dpl_5LH3Lzp7aHm7gxnYqsVLdhapPXHF`). Root, `/games/12/rules`, `/profile/referral` and an unknown SPA route return HTTP 200; the served bundle includes banker bidding, Telegram MainButton wiring, native Telegram BackButton routing with browser-only fallback, build identity display, two-decimal settlement handling, the Telegram-runtime API-write guard, Telegram theme/viewport event updates, live SSE round updates, SecureStorage compatibility warning and configurable Telegram announcement/support links. Production build identity `0b2e2b7` is present in the served bundle.
+- Mini App and bundled API production alias: `https://project-12-demo-staging-public.vercel.app` (latest verified deployment `dpl_FmpcEquzpqy2orHQ8D4J5rKDYZHs`). Root, `/api/health` and `/api/health/live` return HTTP 200. The public runtime reports `mode: demo`, `packetProvider: DEMO_READY`, `realMoneyDisabled: true`, `bot: blocked` and `database: disabled` until deployment credentials are added.
 - Admin production alias: `https://project-12-admin-staging.vercel.app` (latest verified deployment `dpl_9ApdYMWBqmFB1YBeedWsjeeqz7hk`). Root and `/admin/rounds` return HTTP 200; the production bundle does not embed the local demo admin token.
-- These are static front-end staging surfaces. A normal browser can preview the deterministic local Demo when no public API origin is supplied; a Telegram runtime blocks onboarding and credit writes until the API is reachable. Admin API panels remain local-fallback until an API is reachable.
+- The public alias serves the mobile-first Mini App and the bundled API Function. The local test harness also covers the Telegram-runtime guard, so a Telegram container cannot silently continue when its API is unavailable.
 - Vercel deployment protection may require `vercel curl` or an authorized browser session for deployment URLs; the public aliases returned HTTP 200 in direct verification.
-- API, Worker, PostgreSQL, Redis and Telegram Bot delivery are not publicly deployed.
+- The Vercel API Function is publicly deployed. The long-running Worker and Supabase/Postgres are not connected yet, and Telegram Bot delivery remains blocked because no BotFather token/webhook secret has been configured.
 
-The remaining external blocker for a complete Telegram staging path is one authorized bundle: Bot token/webhook secret, a public API/Worker container host, managed Postgres/Redis credentials and the final API origin to inject into the Mini App build. Once supplied, deploy API/Worker/data, configure the Bot webhook, set the demo-only environment values, and run the health/checklist gate. Keep real-money flags false.
+The remaining external blocker for a complete Telegram staging path is the owner-controlled Bot token/webhook secret and Supabase Postgres connection. Once supplied, apply the schema/migrations, set Vercel environment values, run `pnpm telegram:configure`, deploy the Worker with the same database/token settings, and run the health/checklist gate. Keep real-money flags false.

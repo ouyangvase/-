@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
-import { safeEqualText } from "@project12/telegram";
+import { safeEqualText } from "../../../packages/telegram/src/index.js";
 
 type WebAppButton = { text: string; web_app: { url: string } };
 type InlineButton = { text: string; web_app?: { url: string }; callback_data?: string };
@@ -27,7 +27,7 @@ const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIG
 const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAME ?? "project12_demo_bot";
 
 export const botCommands: BotCommand[] = [
-  { command: "start", description: "打开 PROJECT 12" },
+  { command: "start", description: "打开 12牛牛" },
   { command: "play", description: "进入游戏大厅" },
   { command: "wallet", description: "查看模拟积分" },
   { command: "history", description: "查看回合记录" },
@@ -65,7 +65,7 @@ export function buildMainMiniAppConfig(): MainMiniAppConfig {
 export function buildWelcomeMessage(chatId: string | number, startParam = ""): BotMessage {
   return {
     chat_id: chatId,
-    text: "欢迎来到 PROJECT 12\n\n点击下方按钮进入游戏大厅。",
+    text: "欢迎来到 12牛牛\n\n点击下方按钮打开小程序进入游戏大厅。",
     reply_markup: buildReplyKeyboard(startParam)
   };
 }

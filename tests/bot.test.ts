@@ -4,7 +4,7 @@ import { buildMiniAppDeepLink, buildStartDeepLink, buildWelcomeMessage, handleMo
 describe("Telegram bot adapter", () => {
   it("builds a welcome message with a Web App launch button", () => {
     const message = buildWelcomeMessage(123, "ref_DEMO");
-    expect(message.text).toBe("欢迎来到 PROJECT 12\n\n点击下方按钮进入游戏大厅。");
+    expect(message.text).toBe("欢迎来到 12牛牛\n\n点击下方按钮打开小程序进入游戏大厅。");
     expect(message.reply_markup.keyboard[0][0].text).toBe("进入游戏大厅");
     expect(message.reply_markup.keyboard[0][0].web_app.url).toBe("http://localhost:4173?startapp=ref_DEMO");
   });

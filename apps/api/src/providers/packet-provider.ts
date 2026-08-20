@@ -1,46 +1,76 @@
-import { demoPacketValue } from "@project12/game-engine";
+import { demoPacketValue } from "../../../../packages/game-engine/src/index.js";
 
 export type PacketProviderStatus = "DEMO_READY" | "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED";
 export type PacketClaimInput = { packetId: string; serverSeed: string; roundId: string; userId: string; claimSequence: number };
-export type PacketRecord = { id: string; provider: string; roundId: string; createdAt: string; cancelledAt?: string };
-export type PacketClaim = { packetId: string; userId: string; value: number; claimedAt: string; label: string };
+export type PacketRecord = { id: string; provider: string; roundId: string; createdAt: string; totalAmount: number; maxClaims: number; claimedAmount: number; claimedCount: number; expiresAt: string; cancelledAt?: string };
+export type PacketClaim = { packetId: string; userId: string; value: number; claimedAt: string; claimSequence: number; label: string; totalAmount: number; maxClaims: number; claimedAmount: number; claimedCount: number; remainingAmount: number; remainingClaims: number };
+export type PacketStore = {
+  readonly configured: boolean;
+  createInternalPacket(input: { roundId: string; amount: number; serverSeedHash?: string }): Promise<PacketRecord>;
+  claimInternalPacket(input: PacketClaimInput): Promise<PacketClaim>;
+  getInternalPacketClaims(packetId: string): Promise<PacketClaim[]>;
+  cancelInternalPacket(packetId: string): Promise<PacketRecord>;
+};
 
 export class PacketProviderError extends Error {
-  constructor(readonly code: "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED" | "AUTHORIZATION_REQUIRED", message: string) { super(message); }
+  constructor(readonly code: "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED" | "AUTHORIZATION_REQUIRED" | "ALREADY_CLAIMED" | "PACKET_EXHAUSTED", message: string) { super(message); }
 }
 
 export interface PacketProvider {
   readonly name: string;
   readonly status: PacketProviderStatus;
-  createPacket(input: { roundId: string; amount: number }): Promise<PacketRecord>;
+  createPacket(input: { roundId: string; amount: number; serverSeedHash?: string }): Promise<PacketRecord>;
   claim(input: PacketClaimInput): Promise<PacketClaim>;
   getClaims(packetId: string): Promise<PacketClaim[]>;
   cancelPacket(packetId: string): Promise<PacketRecord>;
 }
 
 export class DemoPacketProvider implements PacketProvider {
-  readonly name = "DemoPacketProvider";
+  readonly name = "InternalPacketProvider";
   readonly status = "DEMO_READY" as const;
   private readonly packets = new Map<string, PacketRecord>();
   private readonly claims = new Map<string, PacketClaim[]>();
 
-  async createPacket(input: { roundId: string; amount: number }): Promise<PacketRecord> {
-    const packet = { id: `demo-packet-${input.roundId}`, provider: this.name, roundId: input.roundId, createdAt: new Date().toISOString() };
+  constructor(private readonly store?: PacketStore) {}
+
+  async createPacket(input: { roundId: string; amount: number; serverSeedHash?: string }): Promise<PacketRecord> {
+    if (!Number.isInteger(input.amount) || input.amount <= 0) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Internal packet amount must be a positive integer");
+    if (this.store?.configured) return this.store.createInternalPacket(input);
+    const packetId = `internal-packet-${input.roundId}`;
+    const existing = this.packets.get(packetId);
+    if (existing) return { ...existing };
+    const maxClaims = Math.max(1, Math.min(8, input.amount));
+    const packet = { id: packetId, provider: this.name, roundId: input.roundId, createdAt: new Date().toISOString(), totalAmount: input.amount, maxClaims, claimedAmount: 0, claimedCount: 0, expiresAt: new Date(Date.now() + 45_000).toISOString() };
     this.packets.set(packet.id, packet);
     this.claims.set(packet.id, []);
-    return packet;
+    return { ...packet };
   }
 
   async claim(input: PacketClaimInput): Promise<PacketClaim> {
-    const packet = this.packets.get(input.packetId) ?? await this.createPacket({ roundId: input.roundId, amount: 0 });
+    if (this.store?.configured) return this.store.claimInternalPacket(input);
+    const packet = this.packets.get(input.packetId) ?? await this.createPacket({ roundId: input.roundId, amount: 250 });
     if (packet.cancelledAt) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Demo packet has been cancelled");
-    const claim = { packetId: packet.id, userId: input.userId, value: demoPacketValue(input.serverSeed, input.roundId, input.userId, input.claimSequence), claimedAt: new Date().toISOString(), label: "DEMO CREDIT · NO CASH VALUE" };
-    this.claims.get(packet.id)?.push(claim);
+    const claims = this.claims.get(packet.id) ?? [];
+    if (claims.some((claim) => claim.userId === input.userId)) throw new PacketProviderError("ALREADY_CLAIMED", "You have already claimed this internal packet");
+    if (claims.length >= packet.maxClaims || packet.claimedAmount >= packet.totalAmount) throw new PacketProviderError("PACKET_EXHAUSTED", "Internal packet has been fully claimed");
+    const claimSequence = claims.length + 1;
+    const remainingClaims = packet.maxClaims - claims.length;
+    const remainingAmount = packet.totalAmount - packet.claimedAmount;
+    const value = remainingClaims === 1 ? remainingAmount : demoPacketValue(input.serverSeed, input.roundId, input.userId, claimSequence, 1, remainingAmount - (remainingClaims - 1));
+    const claimedAt = new Date().toISOString();
+    const claim = { packetId: packet.id, userId: input.userId, value, claimedAt, claimSequence, label: "PROJECT 12 INTERNAL CREDIT · NO CASH VALUE", totalAmount: packet.totalAmount, maxClaims: packet.maxClaims, claimedAmount: packet.claimedAmount + value, claimedCount: claims.length + 1, remainingAmount: remainingAmount - value, remainingClaims: remainingClaims - 1 };
+    claims.push(claim);
+    this.claims.set(packet.id, claims);
+    this.packets.set(packet.id, { ...packet, claimedAmount: claim.claimedAmount, claimedCount: claim.claimedCount });
     return claim;
   }
 
-  async getClaims(packetId: string): Promise<PacketClaim[]> { return [...(this.claims.get(packetId) ?? [])]; }
+  async getClaims(packetId: string): Promise<PacketClaim[]> {
+    if (this.store?.configured) return this.store.getInternalPacketClaims(packetId);
+    return [...(this.claims.get(packetId) ?? [])];
+  }
   async cancelPacket(packetId: string): Promise<PacketRecord> {
+    if (this.store?.configured) return this.store.cancelInternalPacket(packetId);
     const packet = this.packets.get(packetId);
     if (!packet) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Packet not found");
     const cancelled = { ...packet, cancelledAt: new Date().toISOString() };
@@ -59,4 +89,4 @@ export class TngPacketProvider implements PacketProvider {
   async cancelPacket(): Promise<never> { return this.unavailable(); }
 }
 
-export function createPacketProvider(): PacketProvider { return process.env.PACKET_PROVIDER === "tng" ? new TngPacketProvider() : new DemoPacketProvider(); }
+export function createPacketProvider(store?: PacketStore): PacketProvider { return new DemoPacketProvider(store); }

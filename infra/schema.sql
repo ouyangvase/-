@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS bets (
 );
 CREATE TABLE IF NOT EXISTS packet_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL UNIQUE REFERENCES rounds(id), provider text NOT NULL DEFAULT 'demo',
-  server_seed_hash text NOT NULL, server_seed text, revealed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+  server_seed_hash text NOT NULL, server_seed text, total_amount bigint NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+  max_claims bigint NOT NULL DEFAULT 1 CHECK (max_claims > 0), claimed_amount bigint NOT NULL DEFAULT 0 CHECK (claimed_amount >= 0),
+  claimed_count bigint NOT NULL DEFAULT 0 CHECK (claimed_count >= 0), expires_at timestamptz NOT NULL DEFAULT (now() + interval '45 seconds'),
+  cancelled_at timestamptz, revealed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS claim_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), packet_id uuid NOT NULL REFERENCES packet_records(id), round_id uuid NOT NULL REFERENCES rounds(id), user_id uuid NOT NULL REFERENCES users(id),
