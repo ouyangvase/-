@@ -263,13 +263,13 @@ async function executeCloseBankerBidding(identity: { userId: string }, key: stri
   return { state: state.round.state, banker: winner.userId, amount: winner.amount, currentHighest: winner.amount, biddingClosed: true, bidCount: bids.length };
 }
 function parseChatBetCommand(text: string): { amount: number; mode: "BET" | "SHOVE" } | undefined {
-  const normal = /^(\d+)$/.exec(text);
+  const normal = /^(?:(?:下注|bet)\s*)?(\d+)$/i.exec(text);
   if (normal) {
     const amount = Number(normal[1]);
     if (amount < 2 || amount > 17) throw new Error("普通下注只能发送 2–17 的整数");
     return { amount, mode: "BET" };
   }
-  const shove = /^sh\s*(\d+)$/i.exec(text);
+  const shove = /^(?:(?:sh|shove)\s*|梭哈\s*)(\d+)$/i.exec(text);
   if (shove) {
     const amount = Number(shove[1]);
     if (amount < 10 || amount > 177) throw new Error("梭哈下注只能发送 sh10–sh177 的整数");
@@ -479,10 +479,10 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
          const data = await body(request);
           const text = typeof data.text === "string" ? data.text.trim().slice(0, 240) : typeof data.body === "string" ? data.body.trim().slice(0, 240) : "";
          if (!text) throw new Error("请输入聊天消息或游戏指令");
-          const numeric = /^(?:sh\s*)?(\d+)$/.exec(text.toLowerCase());
-          const bankerNumeric = /^(\d+)$/.exec(text);
-          const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价)$/i.test(text);
-          const closeCommand = /^(?:stop|close|停止下注|结束下注)$/i.test(text);
+          const numeric = /^(?:(?:sh|shove|梭哈|下注|bet)\s*)?(\d+)$/.exec(text.toLowerCase());
+          const bankerNumeric = /^(?:(?:抢庄|竞庄|庄|bid)\s*)?(\d+)$/i.exec(text);
+          const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价|抢庄结束|封盘抢庄)$/i.test(text);
+          const closeCommand = /^(?:stop|close|停止下注|结束下注|下注结束|封盘)$/i.test(text);
           const restartCommand = /^(?:\/重推|重推|restart|reopen)$/i.test(text);
           const confirmCommand = /^(?:1|confirm|确认|确认发包|确认发红包|开始发红包)$/i.test(text);
           const claimCommand = /^(?:抢红包|领红包|开红包|claim|open|open\s*packet)$/i.test(text);
@@ -542,11 +542,11 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
              command: "HELP",
              result: {
                state: state.round.state,
-              message: state.round.state === "BANKER_BIDDING" ? "发送数字抢庄，例如 600；最高者发送 结束抢庄" : state.round.state === "BETTING" ? "发送 2–17 下注，或发送 sh10–sh177 梭哈；庄家发送 停止下注" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包，或发送 /重推 取消本局" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "请等待本局继续"
+              message: state.round.state === "BANKER_BIDDING" ? "在聊天室发送数字或“抢庄 600”；最高者发送“结束抢庄”" : state.round.state === "BETTING" ? "在聊天室发送 2–17 或“下注 5”，也可发送 sh10 / 梭哈 50；庄家发送“停止下注”或“封盘”" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家在聊天室发送“确认发包”，或发送 /重推 取消本局" : state.round.state === "CLAIMING" ? "本局参与者在聊天室发送“抢红包”领取内部红包" : "请等待本局继续"
              }
            };
          }
-          const looksLikeGameInput = numeric || closeBankerCommand || closeCommand || restartCommand || confirmCommand || claimCommand || /^(?:help|帮助|玩法)$/i.test(text);
+          const looksLikeGameInput = numeric || bankerNumeric || closeBankerCommand || closeCommand || restartCommand || confirmCommand || claimCommand || /^(?:help|帮助|玩法)$/i.test(text);
           if (!looksLikeGameInput && !text.startsWith("/")) {
             addRoomMessage("USER", text, { messageType: "CHAT" }, identity.userId);
             return { command: "MESSAGE", result: { state: state.round.state, message: text } };
