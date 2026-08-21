@@ -385,7 +385,18 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
   return { ...claim, hand, results, allClaimed, claimedCount: claims.length, maxClaims: bettorIds.length, state: state.round.state };
 }
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
-async function hydrateRuntime(runtime: ApiRuntime): Promise<void> { if (!persistence.configured) return; const snapshot = await persistence.loadRoundRuntime(); if (snapshot) { runtime.state.round.state = snapshot.state; runtime.state.round.banker = snapshot.bankerUserId ?? runtime.state.round.banker; runtime.state.round.bankPool = snapshot.bankerPool; runtime.balances.BANKER_POOL = snapshot.bankerPool; } }
+async function hydrateRuntime(runtime: ApiRuntime): Promise<void> {
+  if (!persistence.configured) return;
+  const snapshot = await persistence.loadRoundRuntime();
+  if (snapshot) {
+    runtime.state.round.state = snapshot.state;
+    runtime.state.round.banker = snapshot.bankerUserId ?? runtime.state.round.banker;
+    runtime.state.round.bankPool = snapshot.bankerPool;
+    runtime.balances.BANKER_POOL = snapshot.bankerPool;
+  }
+  const bettors = await persistence.listRoundBettors();
+  roundBettors.set(runtime.state.round.id, new Map(bettors.map((bettor) => [bettor.userId, bettor.amount])));
+}
 async function hydrateUserRuntime(userId: string, runtime = activeRuntime()): Promise<void> {
   const snapshot = await persistence.loadUserRuntime(userId);
   if (!snapshot) return;
