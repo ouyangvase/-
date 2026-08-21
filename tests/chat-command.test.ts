@@ -37,6 +37,10 @@ describe("internal chat game commands", () => {
     const preference = await request("/api/preferences/locale", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "chat-command-locale", ...bettorSession }, body: JSON.stringify({ locale: "vi" }) });
     expect((await preference.json()).result.locale).toBe("vi");
     await approve("chat-command-bettor", bettorSession, "chat-command-bettor");
+    const numericBettorSession = await authenticate("chat-command-numeric-bettor", "en");
+    await approve("chat-command-numeric-bettor", numericBettorSession, "chat-command-numeric-bettor");
+    const shoveBettorSession = await authenticate("chat-command-shove-bettor", "en");
+    await approve("chat-command-shove-bettor", shoveBettorSession, "chat-command-shove-bettor");
     const spectatorSession = await authenticate("chat-command-spectator", "en");
     await approve("chat-command-spectator", spectatorSession, "chat-command-spectator");
     const command = (session: Record<string, string>, text: string, key: string) => request("/api/chat/rooms/room-12/messages", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
@@ -63,6 +67,12 @@ describe("internal chat game commands", () => {
     const bet = await command(bankerSession, "下注 5", "chat-command-bet");
     expect(bet.status).toBe(200);
     expect((await bet.json()).result.result.state).toBe("BETTING");
+    const plainNumericBet = await command(numericBettorSession, "5", "chat-command-plain-numeric-bet");
+    expect(plainNumericBet.status).toBe(200);
+    expect((await plainNumericBet.json()).result.result.state).toBe("BETTING");
+    const shove = await command(shoveBettorSession, "sh10", "chat-command-shove");
+    expect(shove.status).toBe(200);
+    expect((await shove.json()).result.result.state).toBe("BETTING");
     const invalidBet = await command(bettorSession, "18", "chat-command-invalid-bet");
     expect(invalidBet.status).toBe(400);
     expect((await invalidBet.json()).error).toContain("2–17");
