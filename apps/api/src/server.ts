@@ -447,6 +447,8 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     } else {
       const roomMessagesAlias = /^\/api\/chat\/rooms\/([^/]+)\/messages$/.exec(originalPath);
       if (roomMessagesAlias?.[1] === "room-12") url.pathname = request.method === "GET" ? "/api/chat/room" : "/api/chat/room/command";
+      const roomRealtimeAlias = /^\/api\/chat\/rooms\/([^/]+)\/realtime$/.exec(originalPath);
+      if (roomRealtimeAlias?.[1] === "room-12") url.pathname = "/api/chat/room/realtime";
       const gameRoomAlias = /^\/api\/game\/rooms\/([^/]+)$/.exec(originalPath);
       if (gameRoomAlias?.[1] === "room-12") url.pathname = "/api/rooms/room-12";
       const claimAlias = /^\/api\/rounds\/([^/]+)\/claim$/.exec(originalPath);
