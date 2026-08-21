@@ -1,4 +1,4 @@
-const states = ["LOBBY", "BANKER_BIDDING", "BETTING", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE"] as const;
+const states = ["LOBBY", "BANKER_BIDDING", "BETTING", "WAITING_BANKER_CONFIRM", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE"] as const;
 
 export function StateRail({ state }: { state: string }) {
   const current = Math.max(0, states.indexOf(state as typeof states[number]));

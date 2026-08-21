@@ -5,7 +5,7 @@ ALTER TABLE user_profiles
 ALTER TABLE user_profiles DROP CONSTRAINT IF EXISTS user_profiles_locale_check;
 ALTER TABLE user_profiles
   ADD CONSTRAINT user_profiles_locale_check
-  CHECK (locale IN ('zh-CN', 'en', 'ms', 'th', 'vi', 'id'));
+  CHECK (locale IN ('zh-CN', 'zh-TW', 'en', 'ms', 'th', 'vi', 'id', 'ja', 'ko', 'fil'));
 
 CREATE INDEX IF NOT EXISTS idx_user_profiles_locale ON user_profiles(locale);
 

@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { buildPrivatePacketNotification, buildRoundNotification, buildVerificationApprovedNotification, handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
+import { buildPrivatePacketNotification, buildVerificationApprovedNotification, handleTelegramUpdate, sendBotApi, type TelegramUpdate } from "@project12/bot";
 import { Project12Database, type QueryExecutor } from "@project12/database";
 import { resolveLocale } from "@project12/i18n";
 import { createTelegramLaunchToken, telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
 import { advanceExpiredRounds } from "./round-advancer.js";
 
-type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "PACKET_SENT" | "CLAIMING" | "EVALUATING" | "SETTLING" | "ROUND_COMPLETE" | "ROUND_CANCELLED" | "REFUNDING" | "REFUNDED" | "DISPUTED";
+type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "WAITING_BANKER_CONFIRM" | "PACKET_SENT" | "CLAIMING" | "EVALUATING" | "SETTLING" | "ROUND_COMPLETE" | "ROUND_CANCELLED" | "REFUNDING" | "REFUNDED" | "DISPUTED";
 
 const pollIntervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 1000);
 const heartbeatIntervalMs = Number(process.env.WORKER_HEARTBEAT_INTERVAL_MS ?? 15_000);
@@ -34,7 +34,7 @@ export function advanceDemoRound(roundId: string, target: DemoRoundState): DemoR
   return withAdvisoryLock(`round:${roundId}`, () => {
     const current = demoRounds.get(roundId);
     if (!current) return undefined;
-    const order: DemoRoundState[] = ["LOBBY", "BANKER_BIDDING", "BETTING", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE"];
+    const order: DemoRoundState[] = ["LOBBY", "BANKER_BIDDING", "BETTING", "WAITING_BANKER_CONFIRM", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE"];
     if (order.indexOf(target) < order.indexOf(current)) return current;
     demoRounds.set(roundId, target);
     return target;
@@ -107,16 +107,13 @@ async function publishDatabaseOutbox(row: OutboxRow): Promise<void> {
       } else await sendBotApi("sendMessage", buildPrivatePacketNotification(telegramUserId, roundId, packetId, amount, locale) as unknown as Record<string, unknown>);
     }
   }
+  if (row.event_type === "INTERNAL_CHAT_MESSAGE") {
+    // Internal chat is delivered by the API/Supabase Realtime. Never mirror it
+    // into a Telegram native group; the bot is only for private notifications.
+  }
   if (row.event_type === "TELEGRAM_GROUP_ROOM_MESSAGE") {
-    const groupChatId = process.env.TELEGRAM_GAME_GROUP_CHAT_ID;
-    if (groupChatId) {
-      const roundId = String(row.payload.roundId ?? "");
-      const text = String(row.payload.body ?? "");
-      const locale = resolveLocale(String(row.payload.locale ?? ""), undefined, "zh-CN");
-      if (!process.env.TELEGRAM_BOT_TOKEN) {
-        if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
-      } else if (roundId && text) await sendBotApi("sendMessage", buildRoundNotification(groupChatId, roundId, text, locale) as unknown as Record<string, unknown>);
-    }
+    // Deliberately ignored: the game authority is the Mini App internal chat,
+    // never a Telegram native group.
   }
   await database.query("UPDATE outbox_events SET published_at = now(), claimed_at = NULL, claimed_by = NULL, last_error = NULL WHERE id = $1", [row.id]);
 }

@@ -62,6 +62,9 @@ importers:
       '@project12/game-engine':
         specifier: workspace:*
         version: link:../../packages/game-engine
+      '@project12/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@project12/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger

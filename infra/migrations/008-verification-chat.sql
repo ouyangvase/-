@@ -16,7 +16,10 @@ CREATE TABLE IF NOT EXISTS room_messages (
   room_id uuid NOT NULL REFERENCES game_rooms(id),
   round_id uuid NOT NULL REFERENCES rounds(id),
   user_id uuid REFERENCES users(id),
+  target_user_id uuid REFERENCES users(id),
   message_type text NOT NULL,
+  visibility text NOT NULL DEFAULT 'PUBLIC_ROOM' CHECK (visibility IN ('PUBLIC_ROOM', 'PARTICIPANTS_ONLY', 'TARGET_USER', 'ADMIN_ONLY')),
+  template_key text,
   body text NOT NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()

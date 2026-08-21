@@ -71,6 +71,16 @@ body { overflow-x: hidden; background: #000; }
 .profile-footer { flex-wrap: wrap; }
 .settings-list button { grid-template-columns: 96px 1fr 20px; }
 .bottom-nav { right: auto; left: 50%; width: min(100%, 430px); max-width: none; transform: translateX(-50%); padding-right: 18px; padding-left: 18px; }
+
+/* The product shell is a compact mobile utility, not a mechanism showcase. */
+.setup-layout { grid-template-columns: minmax(0, 560px); justify-content: center; }
+.setup-layout > .mechanism-visual,
+.reference-banner .mechanism-visual,
+.rules-intro .mechanism-visual,
+.profile-hero .mechanism-visual { display: none; }
+.reference-banner { grid-template-columns: 1fr; }
+.rules-intro { grid-template-columns: 1fr; }
+.profile-hero { grid-template-columns: auto 1fr; }
 .toast { right: auto; left: 50%; width: min(calc(100% - 36px), 394px); max-width: none; transform: translateX(-50%); }
 
 @media (max-width: 350px) {
@@ -149,6 +159,8 @@ body { overflow-x: hidden; background: #000; }
 .chat-input-row .mechanism-input { min-height: 46px; border-radius: 999px; }
 .chat-send { min-height: 46px; padding: 0 16px; }
 .chat-packet-action { min-height: 40px; margin-top: 10px; padding: 0 16px; }
+.chat-history-button { width: 100%; min-height: 38px; border: 1px solid var(--steel-dark); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.04); font-size: 11px; }
+.chat-history-button:disabled { opacity: .55; }
 .chat-game-cta { width: 100%; }
 .verification-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; align-items: end; padding: 18px; background: rgba(0,0,0,.72); }
 .verification-modal { width: min(100%, 398px); max-height: calc(100dvh - 36px); margin: 0 auto; overflow: auto; padding: 28px 20px 22px; border: 1px solid rgba(245,245,247,.2); border-radius: 24px; background: #1e1f24; box-shadow: 0 24px 80px rgba(0,0,0,.5); }
@@ -180,3 +192,131 @@ body { overflow-x: hidden; background: #000; }
 .settings-note strong, .settings-note small { display: block; }
 .settings-note strong { color: var(--text); }
 .settings-note small { margin-top: 5px; line-height: 1.5; }
+
+/* Ranking and reward surfaces mirror the reference app's simple mobile lists. */
+.surface-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 -18px; border-bottom: 1px solid var(--hairline); }
+.surface-tabs button { min-height: 58px; padding: 0 7px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; font-size: 12px; font-weight: 700; line-height: 1.25; }
+.surface-tabs button.active { border-bottom-color: #4b8cff; color: #70a7ff; }
+.leaderboard-list { margin-top: 8px; }
+.leaderboard-list article { display: grid; grid-template-columns: 32px 42px minmax(0, 1fr) auto; gap: 10px; min-height: 76px; align-items: center; border-bottom: 1px solid var(--hairline); }
+.leaderboard-list article strong { overflow: hidden; color: var(--paper); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.leaderboard-list article b { color: var(--paper); font-size: 13px; white-space: nowrap; }
+.leaderboard-medal, .leaderboard-rank { display: grid; place-items: center; min-height: 28px; color: var(--muted); font-size: 16px; }
+.leaderboard-rank { font-family: ui-monospace, monospace; font-size: 13px; }
+.leaderboard-avatar { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--steel-dark); border-radius: 50%; color: var(--bone); background: #24252c; font-family: ui-monospace, monospace; font-size: 10px; }
+.reward-stack { display: grid; gap: 12px; margin-top: 16px; }
+.reward-card { padding: 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 16px; background: rgba(255,255,255,.035); }
+.reward-card-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 11px; align-items: center; }
+.reward-icon { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(221,180,37,.55); border-radius: 50%; color: var(--brass-light); background: rgba(221,180,37,.1); font-size: 18px; }
+.reward-card-head strong, .reward-card-head small { display: block; }
+.reward-card-head strong { color: var(--paper); font-size: 14px; }
+.reward-card-head small { margin-top: 4px; color: var(--muted); font: 10px ui-monospace, monospace; }
+.reward-card-head > b { color: var(--brass-light); font-size: 13px; white-space: nowrap; }
+.reward-card .meter { margin: 15px 0 11px; }
+.reward-card .text-button { min-height: 32px; }
+
+@media (max-width: 350px) {
+  .surface-tabs { margin-right: -15px; margin-left: -15px; }
+  .surface-tabs button { font-size: 11px; }
+  .leaderboard-list article { grid-template-columns: 26px 38px minmax(0, 1fr) auto; gap: 7px; }
+  .leaderboard-avatar { width: 38px; height: 38px; }
+}
+
+/* Final Telegram Mini App mobile surface: compact, touch-first and chat-led. */
+:root { --text: var(--paper); --signal-blue: #4285f4; --tg-surface: #1e1f24; --tg-surface-raised: #292a30; }
+.app-shell { width: 100%; max-width: 480px; min-height: var(--tg-viewport-stable-height, 100dvh); padding-right: 16px; padding-left: 16px; background: #1b1c21; }
+.topbar { min-height: 66px; align-items: center; }
+.topbar-title { border-left: 0; padding-left: 0; }
+.topbar-title .eyebrow { color: rgba(245,245,247,.46); letter-spacing: .11em; }
+.topbar h1 { margin-top: 6px; font-size: 28px; letter-spacing: -.06em; }
+.avatar-button { width: 40px; height: 40px; border-color: rgba(255,255,255,.12); background: #2c2d33; }
+.demo-pull { margin-bottom: 18px; border-bottom-color: rgba(255,255,255,.08); color: #70a7ff; }
+.demo-pull > span:last-child { color: rgba(245,245,247,.38); }
+.screen { gap: 22px; padding-bottom: 8px; }
+.primary-action, .mechanism-cta { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; gap: 9px; width: 100%; padding: 0 18px; border: 0; border-radius: 14px; color: #fff; background: var(--signal-blue); box-shadow: 0 7px 18px rgba(66,133,244,.22); font-size: 14px; font-weight: 750; letter-spacing: 0; }
+.primary-action:hover, .mechanism-cta:hover { border-color: transparent; color: #fff; background: #5b96f6; }
+.primary-action:active, .mechanism-cta:active { transform: translateY(1px); }
+.field-input, .mechanism-input { width: 100%; min-height: 50px; padding: 0 14px; border: 1px solid rgba(255,255,255,.13); border-radius: 12px; color: var(--bone); background: #292a30; font-size: 16px; }
+.field-input:focus, .mechanism-input:focus { border-color: rgba(66,133,244,.8); outline: 0; }
+.setup-shell { width: 100%; max-width: 480px; min-height: var(--tg-viewport-stable-height, 100dvh); padding: calc(var(--safe-top) + 18px) 16px calc(24px + var(--safe-bottom)); background: #1b1c21; }
+.setup-mobile-header { display: flex; align-items: center; gap: 8px; color: rgba(245,245,247,.52); font-size: 12px; }
+.setup-brand { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 11px; color: #fff; background: var(--signal-blue); font-weight: 800; }
+.setup-mobile-header .setup-step { margin-left: auto; color: rgba(245,245,247,.36); font-family: ui-monospace, monospace; }
+.setup-card { align-self: center; width: 100%; padding: 24px 0 16px; }
+.setup-card h1 { margin-top: 12px; font-size: clamp(34px, 10vw, 48px); line-height: .96; }
+.setup-card .lead { margin-top: 14px; color: rgba(245,245,247,.66); font-size: 14px; }
+.setup-card-icon { display: grid; width: 58px; height: 58px; place-items: center; margin-bottom: 18px; border: 1px solid rgba(66,133,244,.45); border-radius: 18px; color: #70a7ff; background: rgba(66,133,244,.12); }
+.setup-trust-list { display: grid; gap: 12px; margin: 24px 0; padding: 16px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: rgba(255,255,255,.035); }
+.setup-trust-list span { display: flex; gap: 10px; align-items: center; color: rgba(245,245,247,.72); font-size: 12px; line-height: 1.4; }
+.setup-trust-list .icon { width: 17px; color: #70a7ff; }
+.setup-card .field-label { margin-top: 22px; color: rgba(245,245,247,.5); }
+.setup-card .primary-action { margin-top: 22px; }
+.reference-section { gap: 12px; }
+.reference-section-heading { align-items: center; }
+.reference-banner { min-height: 170px; border: 0; border-radius: 16px; background: linear-gradient(135deg, #28345d, #1d2541 54%, #47232b); }
+.reference-banner::before { background: linear-gradient(110deg, rgba(39,65,132,.9), rgba(21,28,55,.3)); }
+.reference-banner-copy { gap: 6px; padding: 18px; }
+.reference-banner-copy span { color: rgba(225,235,255,.72); }
+.reference-banner-copy strong { color: #fff; font-size: clamp(25px, 8vw, 38px); }
+.reference-banner-copy b { color: #dbe8ff; font-size: 14px; }
+.reference-banner-copy small { color: rgba(219,232,255,.68); }
+.banner-action { align-self: flex-start; min-height: 30px; margin-top: 5px; padding: 0 11px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; color: #fff; background: rgba(0,0,0,.18); font-size: 11px; }
+.banner-glow { position: absolute; right: 13px; bottom: 12px; z-index: 1; display: grid; width: 100px; height: 100px; place-content: center; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; color: rgba(255,255,255,.86); background: radial-gradient(circle, rgba(91,150,246,.5), rgba(66,133,244,.04) 68%); transform: rotate(-8deg); }
+.banner-glow span { font: 700 42px ui-monospace, monospace; line-height: .8; text-align: center; }
+.banner-glow b { margin-top: 8px; font-size: 13px; text-align: center; }
+.reference-game-card { border-color: rgba(255,255,255,.11); border-radius: 16px; }
+.reference-game-card > img { aspect-ratio: 1.3 / 1; }
+.reference-game-footer { min-height: 78px; padding: 14px; }
+.reference-game-footer strong { font-size: 20px; }
+.reference-game-footer span { min-height: 38px; padding: 0 12px; border-radius: 19px; color: rgba(245,245,247,.75); background: #33343a; font-size: 12px; }
+.simple-rules { gap: 18px; }
+.rules-intro { display: block; padding: 8px 0 18px; }
+.rules-intro h1 { margin-top: 12px; font-size: 34px; line-height: 1; }
+.rules-intro p { margin-top: 13px; font-size: 13px; }
+.rules-mobile-steps { display: grid; gap: 8px; }
+.rules-mobile-steps button { display: grid; grid-template-columns: 30px 1fr; gap: 3px 10px; padding: 13px 14px; border: 1px solid rgba(255,255,255,.1); border-radius: 13px; color: var(--paper); background: rgba(255,255,255,.035); text-align: left; }
+.rules-mobile-steps button.active { border-color: rgba(66,133,244,.75); background: rgba(66,133,244,.13); }
+.rules-mobile-steps button > span { grid-row: span 2; color: #70a7ff; font: 11px ui-monospace, monospace; }
+.rules-mobile-steps strong { font-size: 14px; }
+.rules-mobile-steps small { color: var(--muted); font-size: 11px; }
+
+/* Arabic keeps the same compact mobile hierarchy while reversing reading order. */
+[dir="rtl"] .screen,
+[dir="rtl"] .topbar,
+[dir="rtl"] .bottom-nav { direction: rtl; }
+[dir="rtl"] .rules-mobile-steps button,
+[dir="rtl"] .settings-list button { text-align: right; }
+[dir="rtl"] .chat-input-row,
+[dir="rtl"] .chat-command-row { direction: rtl; }
+.rules-note { padding: 18px 0 0; border-top-color: rgba(66,133,244,.55); }
+.rules-note h2 { font-size: 24px; }
+.rules-note p { font-size: 13px; }
+.rules-note .primary-action { margin-top: 16px; }
+.profile-card { padding: 18px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: rgba(255,255,255,.035); }
+.profile-hero { display: flex; gap: 13px; align-items: center; }
+.profile-avatar { display: grid; width: 54px; height: 54px; place-items: center; border-radius: 50%; color: #fff; background: #536da9; font-weight: 800; }
+.profile-hero h1 { margin-top: 7px; font-size: 25px; letter-spacing: -.05em; }
+.profile-hero p { margin-top: 5px; color: var(--muted); font: 10px ui-monospace, monospace; }
+.settings-list { border-top: 1px solid var(--hairline); }
+.settings-list button { grid-template-columns: 1fr 18px; gap: 12px; min-height: 64px; padding: 11px 0; border-bottom-color: rgba(255,255,255,.08); }
+.settings-list button strong { margin-top: 4px; color: var(--paper); font-size: 14px; }
+.chat-room-head { padding: 8px 0 16px; }
+.chat-room-head h1 { font-size: 29px; }
+.chat-room-head p { font-size: 12px; }
+.chat-round-strip span { border: 0; border-radius: 11px; background: rgba(255,255,255,.055); }
+.room-message-list { gap: 8px; min-height: 260px; }
+.room-message { padding: 12px 13px; border: 0; border-radius: 14px; background: #2c2d33; }
+.room-message-system, .room-message-round, .room-message-settlement { background: #30323a; }
+.room-message-packet { background: linear-gradient(135deg, #ad3038, #76212d); }
+.room-message p { font-size: 14px; }
+.room-message-type { color: rgba(245,245,247,.52); }
+.chat-composer { margin-right: -16px; margin-left: -16px; padding: 10px 12px calc(10px + var(--safe-bottom)); background: rgba(27,28,33,.96); }
+.chat-input-row .mechanism-input { min-height: 44px; border: 0; border-radius: 12px; background: #2c2d33; }
+.chat-send { width: auto; min-height: 44px; border-radius: 12px; padding: 0 14px; }
+.chat-packet-action { width: auto; min-height: 40px; border-radius: 10px; }
+.verification-modal .mechanism-input { border-radius: 12px; }
+.verification-close { width: 100%; }
+.bottom-nav { max-width: 448px; border: 1px solid rgba(255,255,255,.1); border-radius: 24px; background: rgba(43,44,50,.94); }
+.bottom-nav button.active { color: #fff; }
+.bottom-nav button.active .icon { color: #fff; }
+@media (min-width: 481px) { body { background: #08090b; } .app-shell, .setup-shell { box-shadow: 0 0 0 1px rgba(255,255,255,.04); } }

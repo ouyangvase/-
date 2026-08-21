@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS room_members (
 );
 CREATE TABLE IF NOT EXISTS rounds (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), room_id uuid NOT NULL REFERENCES game_rooms(id), rule_version_id uuid NOT NULL REFERENCES round_rule_versions(id),
-  state text NOT NULL CHECK (state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING', 'ROUND_COMPLETE', 'ROUND_CANCELLED', 'REFUNDING', 'REFUNDED', 'DISPUTED')),
+  state text NOT NULL CHECK (state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'WAITING_BANKER_CONFIRM', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING', 'ROUND_COMPLETE', 'ROUND_CANCELLED', 'REFUNDING', 'REFUNDED', 'DISPUTED')),
   state_started_at timestamptz NOT NULL DEFAULT now(), state_ends_at timestamptz, state_version bigint NOT NULL DEFAULT 1, banker_user_id uuid REFERENCES users(id),
   server_seed_hash text, server_seed text, seed_revealed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -93,7 +93,9 @@ CREATE TABLE IF NOT EXISTS round_events (
 );
 CREATE TABLE IF NOT EXISTS room_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), room_id uuid NOT NULL REFERENCES game_rooms(id), round_id uuid NOT NULL REFERENCES rounds(id),
-  user_id uuid REFERENCES users(id), message_type text NOT NULL, body text NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  user_id uuid REFERENCES users(id), target_user_id uuid REFERENCES users(id), message_type text NOT NULL,
+  visibility text NOT NULL DEFAULT 'PUBLIC_ROOM' CHECK (visibility IN ('PUBLIC_ROOM', 'PARTICIPANTS_ONLY', 'TARGET_USER', 'ADMIN_ONLY')),
+  template_key text, body text NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS banker_bids (
@@ -224,6 +226,7 @@ CREATE TABLE IF NOT EXISTS admin_actions (
 
 CREATE INDEX IF NOT EXISTS idx_round_events_round_created ON round_events(round_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_room_messages_room_created ON room_messages(room_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_room_messages_template_key ON room_messages(template_key) WHERE template_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_audit_logs_reference ON audit_logs(reference_type, reference_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_risk_flags_status ON risk_flags(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON outbox_events(created_at) WHERE published_at IS NULL;

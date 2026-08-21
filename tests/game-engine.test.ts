@@ -19,7 +19,8 @@ describe("demo game engine", () => {
   it("compares special rank before amount", () => expect(compareHands({ type: "豹子", points: 10, amount: 1 }, { type: "满牛", points: 10, amount: 99 })).toBe("PLAYER_WIN"));
   it("uses amount as the final tie breaker", () => expect(compareHands({ type: "普通点数", points: 9, amount: 3.42 }, { type: "普通点数", points: 9, amount: 1.08 })).toBe("PLAYER_WIN"));
   it("allows only server state-machine transitions", () => {
-    expect(() => assertTransition("BETTING", "PACKET_SENT")).not.toThrow();
+    expect(() => assertTransition("BETTING", "WAITING_BANKER_CONFIRM")).not.toThrow();
+    expect(() => assertTransition("WAITING_BANKER_CONFIRM", "PACKET_SENT")).not.toThrow();
     expect(() => assertTransition("PACKET_SENT", "CLAIMING")).not.toThrow();
     expect(() => assertTransition("ROUND_COMPLETE", "BETTING")).toThrow("Invalid round transition");
   });
@@ -27,7 +28,8 @@ describe("demo game engine", () => {
     expect(() => {
       assertTransition("LOBBY", "BANKER_BIDDING");
       assertTransition("BANKER_BIDDING", "BETTING");
-      assertTransition("BETTING", "PACKET_SENT");
+      assertTransition("BETTING", "WAITING_BANKER_CONFIRM");
+      assertTransition("WAITING_BANKER_CONFIRM", "PACKET_SENT");
       assertTransition("PACKET_SENT", "CLAIMING");
       assertTransition("CLAIMING", "EVALUATING");
       assertTransition("EVALUATING", "SETTLING");

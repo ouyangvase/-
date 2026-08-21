@@ -14,7 +14,7 @@ export type PacketStore = {
 };
 
 export class PacketProviderError extends Error {
-  constructor(readonly code: "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED" | "AUTHORIZATION_REQUIRED" | "ALREADY_CLAIMED" | "PACKET_EXHAUSTED", message: string) { super(message); }
+  constructor(readonly code: "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED" | "AUTHORIZATION_REQUIRED" | "ROUND_PARTICIPANT_REQUIRED" | "ALREADY_CLAIMED" | "PACKET_EXHAUSTED", message: string) { super(message); }
 }
 
 export interface PacketProvider {

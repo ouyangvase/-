@@ -21,6 +21,6 @@ describe("Worker runtime primitives", () => {
   it("maps only safe deadline-driven states to the next durable state", () => {
     expect(nextTimedState("PACKET_SENT")).toBe("CLAIMING");
     expect(nextTimedState("CLAIMING")).toBe("EVALUATING");
-    expect(nextTimedState("BANKER_BIDDING")).toBeUndefined();
+    expect(nextTimedState("BANKER_BIDDING")).toBe("BETTING");
   });
 });

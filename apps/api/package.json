@@ -11,6 +11,7 @@
     "@project12/contracts": "workspace:*",
     "@project12/database": "workspace:*",
     "@project12/game-engine": "workspace:*",
+    "@project12/i18n": "workspace:*",
     "@project12/ledger": "workspace:*",
     "@project12/telegram": "workspace:*",
     "@types/pg": "8.11.10",

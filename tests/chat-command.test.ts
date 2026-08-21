@@ -20,29 +20,60 @@ describe("internal chat game commands", () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
-  it("moves a verified player through banker, bet and private packet stages", async () => {
-    const auth = await request("/api/auth/telegram", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ demoUser: "chat-command-player", locale: "ms" }) });
-    const authBody = await auth.json() as { token: string };
-    const session = { "x-session-token": authBody.token };
-    expect((await (await request("/api/preferences/locale", { headers: session })).json()).locale).toBe("ms");
-    const preference = await request("/api/preferences/locale", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "chat-command-locale", ...session }, body: JSON.stringify({ locale: "vi" }) });
+  it("moves banker and bettor through confirmation and private packet stages", async () => {
+    const authenticate = async (demoUser: string, locale?: string) => {
+      const auth = await request("/api/auth/telegram", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ demoUser, locale }) });
+      const authBody = await auth.json() as { token: string };
+      return { "x-session-token": authBody.token };
+    };
+    const approve = async (demoUser: string, session: Record<string, string>, key: string) => {
+      await request("/api/verification/submit", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": `${key}-verify`, ...session }, body: JSON.stringify({ legalName: `${demoUser} Legal`, tngAccountNo: "1234567890" }) });
+      await request(`/api/admin/verification/${demoUser}/review`, { method: "POST", headers: { "content-type": "application/json", "x-demo-admin-token": "admin-demo-only", "idempotency-key": `${key}-review` }, body: JSON.stringify({ status: "APPROVED" }) });
+    };
+    const bankerSession = await authenticate("chat-command-banker", "en");
+    await approve("chat-command-banker", bankerSession, "chat-command-banker");
+    const bettorSession = await authenticate("chat-command-bettor", "ms");
+    expect((await (await request("/api/preferences/locale", { headers: bettorSession })).json()).locale).toBe("ms");
+    const preference = await request("/api/preferences/locale", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "chat-command-locale", ...bettorSession }, body: JSON.stringify({ locale: "vi" }) });
     expect((await preference.json()).result.locale).toBe("vi");
-    await request("/api/verification/submit", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "chat-command-verify", ...session }, body: JSON.stringify({ legalName: "Chat Player", tngAccountNo: "1234567890" }) });
-    await request("/api/admin/verification/chat-command-player/review", { method: "POST", headers: { "content-type": "application/json", "x-demo-admin-token": "admin-demo-only" }, body: JSON.stringify({ status: "APPROVED" }) });
-    const command = (text: string, key: string) => request("/api/chat/room/command", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
+    await approve("chat-command-bettor", bettorSession, "chat-command-bettor");
+    const spectatorSession = await authenticate("chat-command-spectator", "en");
+    await approve("chat-command-spectator", spectatorSession, "chat-command-spectator");
+    const command = (session: Record<string, string>, text: string, key: string) => request("/api/chat/room/command", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
 
-    const bid = await command("400", "chat-command-bid");
+    const bid = await command(bankerSession, "600", "chat-command-bid");
     expect(bid.status).toBe(200);
-    expect((await bid.json()).result.result.state).toBe("BETTING");
-    const bet = await command("sh 10", "chat-command-bet");
+    expect((await bid.json()).result.result.state).toBe("BANKER_BIDDING");
+    const higherBid = await command(bettorSession, "700", "chat-command-higher-bid");
+    expect(higherBid.status).toBe(200);
+    expect((await higherBid.json()).result.result.banker).toBe("chat-command-bettor");
+    const blockedCloseBidding = await command(bankerSession, "结束抢庄", "chat-command-non-highest-close");
+    expect(blockedCloseBidding.status).toBe(400);
+    expect((await blockedCloseBidding.json()).error).toContain("当前最高庄金");
+    const closeBidding = await command(bettorSession, "结束抢庄", "chat-command-close-bidding");
+    expect(closeBidding.status).toBe(200);
+    expect((await closeBidding.json()).result.result.state).toBe("BETTING");
+    const bet = await command(bankerSession, "sh 10", "chat-command-bet");
     expect(bet.status).toBe(200);
     expect((await bet.json()).result.result.state).toBe("BETTING");
-    const close = await command("停止下注", "chat-command-close");
+    const close = await command(bettorSession, "停止下注", "chat-command-close");
     expect(close.status).toBe(200);
-    expect((await close.json()).result.result.state).toBe("CLAIMING");
-    const room = await request("/api/chat/room", { headers: session });
+    expect((await close.json()).result.result.state).toBe("WAITING_BANKER_CONFIRM");
+    const blockedConfirm = await command(bankerSession, "确认发红包", "chat-command-bettor-confirm");
+    expect(blockedConfirm.status).toBe(400);
+    expect((await blockedConfirm.json()).error).toContain("庄家");
+    const confirm = await command(bettorSession, "确认发红包", "chat-command-confirm");
+    expect(confirm.status).toBe(200);
+    expect((await confirm.json()).result.result.state).toBe("CLAIMING");
+    const room = await request("/api/chat/room", { headers: bankerSession });
     const roomBody = await room.json() as { messages: Array<{ body: string }> };
     expect(roomBody.messages.some((message) => message.body.includes("下单 10 PT"))).toBe(true);
-    expect(roomBody.messages.some((message) => message.body.includes("平台红包已向本局"))).toBe(true);
+    expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
+    const bankerRoom = await request("/api/chat/room", { headers: bettorSession });
+    const bankerRoomBody = await bankerRoom.json() as { messages: Array<{ body: string }> };
+    expect(bankerRoomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(false);
+    const spectatorRoom = await request("/api/chat/room", { headers: spectatorSession });
+    const spectatorRoomBody = await spectatorRoom.json() as { messages: Array<{ body: string }> };
+    expect(spectatorRoomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(false);
   });
 });

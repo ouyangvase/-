@@ -1,4 +1,4 @@
-import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function key(): Buffer {
   return createHash("sha256")
@@ -12,6 +12,14 @@ export function encryptVerificationValue(value: string): string {
   const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return [iv, tag, ciphertext].map((part) => part.toString("base64url")).join(".");
+}
+
+export function decryptVerificationValue(value: string): string {
+  const [ivEncoded, tagEncoded, ciphertextEncoded] = value.split(".");
+  if (!ivEncoded || !tagEncoded || !ciphertextEncoded) throw new Error("Invalid encrypted verification value");
+  const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(ivEncoded, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagEncoded, "base64url"));
+  return Buffer.concat([decipher.update(Buffer.from(ciphertextEncoded, "base64url")), decipher.final()]).toString("utf8");
 }
 
 export function maskTngAccount(value: string): string {

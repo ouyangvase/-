@@ -3,7 +3,7 @@ import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils";
 
 export const roundStates = [
-  "LOBBY", "BANKER_BIDDING", "BETTING", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE",
+  "LOBBY", "BANKER_BIDDING", "BETTING", "WAITING_BANKER_CONFIRM", "PACKET_SENT", "CLAIMING", "EVALUATING", "SETTLING", "ROUND_COMPLETE",
   "ROUND_CANCELLED", "REFUNDING", "REFUNDED", "DISPUTED"
 ] as const;
 export type RoundState = typeof roundStates[number];
@@ -11,7 +11,8 @@ export type RoundState = typeof roundStates[number];
 const allowedTransitions: Record<RoundState, readonly RoundState[]> = {
   LOBBY: ["BANKER_BIDDING", "ROUND_CANCELLED"],
   BANKER_BIDDING: ["BETTING", "ROUND_CANCELLED"],
-  BETTING: ["PACKET_SENT", "ROUND_CANCELLED"],
+  BETTING: ["WAITING_BANKER_CONFIRM", "ROUND_CANCELLED"],
+  WAITING_BANKER_CONFIRM: ["PACKET_SENT", "ROUND_CANCELLED"],
   PACKET_SENT: ["CLAIMING", "ROUND_CANCELLED"],
   CLAIMING: ["EVALUATING", "ROUND_CANCELLED"],
   EVALUATING: ["SETTLING", "ROUND_CANCELLED"],

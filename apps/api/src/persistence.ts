@@ -5,7 +5,7 @@ import type { Journal } from "../../../packages/ledger/src/index.js";
 import type { RoundState } from "../../../packages/contracts/src/index.js";
 import { PacketProviderError, type PacketClaim, type PacketRecord, type PacketStore } from "./providers/packet-provider.js";
 import { telegramLaunchTokenHash } from "../../../packages/telegram/src/index.js";
-import { encryptVerificationValue, maskTngAccount } from "./verification-security.js";
+import { decryptVerificationValue, encryptVerificationValue, maskTngAccount } from "./verification-security.js";
 
 const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 
@@ -16,6 +16,7 @@ export type RoundRuntimeSnapshot = { state: RoundState; bankerUserId?: string; b
 
 type PacketRow = {
   id: string;
+  round_id?: string;
   provider: string;
   total_amount: string | number;
   max_claims: string | number;
@@ -34,9 +35,20 @@ export type UserRuntimeSnapshot = {
   onboarding: { deviceBound: boolean; referrerBound: boolean; pinSet: boolean };
   ledger: Array<{ id: string; reason: string; change: number; balanceAfter: number; createdAt: string }>;
 };
-export type VerificationStatus = "UNVERIFIED" | "PENDING" | "APPROVED" | "REJECTED";
+export type VerificationStatus = "NOT_SUBMITTED" | "PENDING" | "APPROVED" | "REJECTED" | "NEEDS_MORE_INFO" | "SUSPENDED";
 export type VerificationSnapshot = { status: VerificationStatus; submittedAt?: string; tngAccountLast4?: string; rejectionReason?: string };
-export type RoomMessage = { id: string; type: string; body: string; actor?: string; createdAt: string; payload: Record<string, unknown> };
+export type VerificationCaseSnapshot = VerificationSnapshot & { telegramUserId: string; legalName?: string; tngAccountMasked?: string };
+export type RoomMessage = {
+  id: string;
+  type: string;
+  body: string;
+  actor?: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+  templateKey?: string;
+  visibility?: "PUBLIC_ROOM" | "PARTICIPANTS_ONLY" | "TARGET_USER" | "ADMIN_ONLY";
+  targetUserId?: string;
+};
 
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 
@@ -55,6 +67,8 @@ function packetRecord(row: PacketRow, roundId: string): PacketRecord {
   };
 }
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export class ApiPersistence implements PacketStore {
   private readonly database: Project12Database;
   private readonly strict: boolean;
@@ -67,6 +81,10 @@ export class ApiPersistence implements PacketStore {
 
   get configured(): boolean { return this.database.configured; }
 
+  private databaseRoundId(roundId?: string): string {
+    return roundId && uuidPattern.test(roundId) ? roundId : this.roundDatabaseId;
+  }
+
   async health(): Promise<"disabled" | "healthy" | "unavailable"> {
     return this.database.health();
   }
@@ -76,14 +94,14 @@ export class ApiPersistence implements PacketStore {
     const rows = await this.database.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string; rejection_reason?: string | null }>(`SELECT iv.status, iv.submitted_at, iv.tng_account_last4, iv.rejection_reason
       FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id WHERE ti.telegram_user_id = $1`, [telegramUserId]);
     const row = rows[0];
-    return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : { status: "UNVERIFIED" };
+    return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : { status: "NOT_SUBMITTED" };
   }
 
   async persistVerification(telegramUserId: string, legalName: string, tngAccountNo: string): Promise<VerificationSnapshot> {
     if (!this.configured) throw new Error("DATABASE_REQUIRED: Verification requires persistent storage");
     const rows = await this.database.transaction(async (client) => {
       const existing = await client.query<{ status: VerificationStatus }>("SELECT iv.status FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id WHERE ti.telegram_user_id = $1 FOR UPDATE", [telegramUserId]);
-      if (existing.rows[0]?.status === "APPROVED") throw new Error("VERIFICATION_ALREADY_APPROVED");
+      if (["APPROVED", "SUSPENDED"].includes(existing.rows[0]?.status ?? "")) throw new Error(existing.rows[0]?.status === "SUSPENDED" ? "VERIFICATION_ACCOUNT_SUSPENDED" : "VERIFICATION_ALREADY_APPROVED");
       return client.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string }>(`INSERT INTO identity_verifications (user_id, legal_name_ciphertext, tng_account_ciphertext, tng_account_last4, status, submitted_at, reviewed_by, reviewed_at, rejection_reason)
         SELECT ti.user_id, $2, $3, $4, 'PENDING', now(), NULL, NULL, NULL FROM telegram_identities ti WHERE ti.telegram_user_id = $1
         ON CONFLICT (user_id) DO UPDATE SET legal_name_ciphertext = EXCLUDED.legal_name_ciphertext, tng_account_ciphertext = EXCLUDED.tng_account_ciphertext,
@@ -104,16 +122,71 @@ export class ApiPersistence implements PacketStore {
     return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : undefined;
   }
 
-  async persistRoomMessage(input: { roundId?: string; userId?: string; type: string; body: string; payload?: Record<string, unknown> }): Promise<void> {
-    await this.run(() => this.database.query(`INSERT INTO room_messages (room_id, round_id, user_id, message_type, body, payload)
-      SELECT r.room_id, r.id, ti.user_id, $2, $3, $4::jsonb FROM rounds r LEFT JOIN telegram_identities ti ON ti.telegram_user_id = $5 WHERE r.id = $1`, [input.roundId ?? this.roundDatabaseId, input.type, input.body, JSON.stringify(input.payload ?? {}), input.userId ?? null]).then(() => undefined));
+  async listVerificationCases(status?: VerificationStatus): Promise<VerificationCaseSnapshot[]> {
+    if (!this.configured) return [];
+    const rows = await this.database.query<{ telegram_user_id: string; legal_name_ciphertext: string; tng_account_last4: string; status: VerificationStatus; submitted_at: string | Date; rejection_reason?: string | null }>(`SELECT ti.telegram_user_id, iv.legal_name_ciphertext, iv.tng_account_last4, iv.status, iv.submitted_at, iv.rejection_reason
+      FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id
+      WHERE ($1::text IS NULL OR iv.status = $1) ORDER BY iv.submitted_at DESC LIMIT 200`, [status ?? null]);
+    return rows.map((row) => ({
+      telegramUserId: row.telegram_user_id,
+      legalName: decryptVerificationValue(row.legal_name_ciphertext),
+      tngAccountMasked: maskTngAccount(row.tng_account_last4),
+      tngAccountLast4: maskTngAccount(row.tng_account_last4),
+      status: row.status,
+      submittedAt: iso(row.submitted_at),
+      ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {})
+    }));
   }
 
-  async loadRoomMessages(roundId?: string): Promise<RoomMessage[]> {
+  async reviewVerificationCase(telegramUserId: string, status: Exclude<VerificationStatus, "NOT_SUBMITTED">, reviewedBy: string, reason?: string): Promise<VerificationSnapshot | undefined> {
+    if (!this.configured) return undefined;
+    const result = await this.database.transaction(async (client) => {
+      const before = await client.query<{ id: string; user_id: string; status: VerificationStatus }>(`SELECT iv.id, iv.user_id, iv.status FROM identity_verifications iv JOIN telegram_identities ti ON ti.user_id = iv.user_id WHERE ti.telegram_user_id = $1 FOR UPDATE`, [telegramUserId]);
+      const current = before.rows[0];
+      if (!current) return undefined;
+      const updated = await client.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string; rejection_reason?: string | null }>(`UPDATE identity_verifications iv SET status = $2, reviewed_by = $3, reviewed_at = now(), rejection_reason = $4
+        FROM telegram_identities ti WHERE iv.user_id = ti.user_id AND ti.telegram_user_id = $1
+        RETURNING iv.status, iv.submitted_at, iv.tng_account_last4, iv.rejection_reason`, [telegramUserId, status, reviewedBy, reason ?? null]);
+      await client.query(`INSERT INTO verification_audit_logs (verification_id, user_id, actor_user_id, action, before_status, after_status, note)
+        VALUES ($1, $2, NULL, 'REVIEW', $3, $4, $5)`, [current.id, current.user_id, current.status, status, reason ?? null]);
+      const row = updated.rows[0];
+      return row ? { status: row.status, submittedAt: iso(row.submitted_at), tngAccountLast4: maskTngAccount(row.tng_account_last4), ...(row.rejection_reason ? { rejectionReason: row.rejection_reason } : {}) } : undefined;
+    });
+    return result;
+  }
+
+  async persistRoomMessage(input: { roundId?: string; userId?: string; type: string; body: string; payload?: Record<string, unknown>; templateKey?: string; visibility?: RoomMessage["visibility"]; targetUserId?: string }): Promise<void> {
+    await this.run(() => this.database.query(`INSERT INTO room_messages (room_id, round_id, user_id, target_user_id, message_type, visibility, template_key, body, payload)
+      SELECT r.room_id, r.id, sender_ti.user_id, target_ti.user_id, $2, $6, $8, $3, $4::jsonb
+      FROM rounds r
+      LEFT JOIN telegram_identities sender_ti ON sender_ti.telegram_user_id = $5
+      LEFT JOIN telegram_identities target_ti ON target_ti.telegram_user_id = $7
+      WHERE r.id = $1`, [input.roundId ?? this.roundDatabaseId, input.type, input.body, JSON.stringify(input.payload ?? {}), input.userId ?? null, input.visibility ?? "PUBLIC_ROOM", input.targetUserId ?? null, input.templateKey ?? null]).then(() => undefined));
+  }
+
+  async loadRoomMessages(roundId?: string, viewerTelegramUserId?: string, before?: string, limit = 50): Promise<RoomMessage[]> {
     if (!this.configured) return [];
-    const rows = await this.database.query<{ id: string; message_type: string; body: string; display_name?: string | null; created_at: string | Date; payload: Record<string, unknown> }>(`SELECT rm.id::text AS id, rm.message_type, rm.body, u.display_name, rm.created_at, rm.payload
-      FROM room_messages rm LEFT JOIN users u ON u.id = rm.user_id WHERE rm.round_id = $1 ORDER BY rm.created_at ASC, rm.id ASC LIMIT 100`, [roundId ?? this.roundDatabaseId]);
-    return rows.map((row) => ({ id: row.id, type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {} }));
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 50, 1), 50);
+    const rows = await this.database.query<{ id: string; message_type: string; template_key?: string | null; visibility?: RoomMessage["visibility"] | null; target_user_id?: string | null; body: string; display_name?: string | null; created_at: string | Date; payload: Record<string, unknown> }>(`SELECT rm.id::text AS id, rm.message_type, rm.template_key, COALESCE(rm.visibility, 'PUBLIC_ROOM') AS visibility,
+        rm.target_user_id::text AS target_user_id, rm.body, u.display_name, rm.created_at, rm.payload
+      FROM room_messages rm
+      LEFT JOIN users u ON u.id = rm.user_id
+      LEFT JOIN telegram_identities target_ti ON target_ti.user_id = rm.target_user_id
+      WHERE rm.round_id = $1
+        AND ($3::timestamptz IS NULL OR rm.created_at < $3::timestamptz)
+        AND (
+          COALESCE(rm.visibility, 'PUBLIC_ROOM') = 'PUBLIC_ROOM'
+          OR (rm.visibility = 'TARGET_USER' AND target_ti.telegram_user_id = $2)
+          OR (rm.visibility = 'PARTICIPANTS_ONLY' AND EXISTS (
+            SELECT 1 FROM round_participants rp
+            JOIN telegram_identities participant_ti ON participant_ti.user_id = rp.user_id
+            WHERE rp.round_id = rm.round_id AND rp.role = 'PLAYER'
+              AND rp.status IN ('ELIGIBLE', 'CLAIMED', 'AUTO_CLAIMED')
+              AND participant_ti.telegram_user_id = $2
+          ))
+        )
+      ORDER BY rm.created_at DESC, rm.id DESC LIMIT ${safeLimit}`, [roundId ?? this.roundDatabaseId, viewerTelegramUserId ?? null, before ?? null]);
+    return rows.reverse().map((row) => ({ id: row.id, type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {}, ...(row.template_key ? { templateKey: row.template_key } : {}), visibility: row.visibility ?? "PUBLIC_ROOM", ...(row.target_user_id ? { targetUserId: row.target_user_id } : {}) }));
   }
 
   async loadUserRuntime(telegramUserId: string): Promise<UserRuntimeSnapshot | undefined> {
@@ -145,8 +218,8 @@ export class ApiPersistence implements PacketStore {
       (round_id, provider, server_seed_hash, total_amount, max_claims, claimed_amount, claimed_count, expires_at)
       VALUES ($1, 'InternalPacketProvider', $2, $3, $4, 0, 0, now() + interval '45 seconds')
       ON CONFLICT (round_id) DO UPDATE SET provider = packet_records.provider
-      RETURNING id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at`,
-    [this.roundDatabaseId, input.serverSeedHash ?? "unavailable", input.amount, maxClaims]);
+      RETURNING id, round_id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at`,
+    [this.databaseRoundId(input.roundId), input.serverSeedHash ?? "unavailable", input.amount, maxClaims]);
     const row = rows[0];
     if (!row) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Unable to create internal packet");
     return packetRecord(row, input.roundId);
@@ -154,15 +227,15 @@ export class ApiPersistence implements PacketStore {
 
   async getInternalPacket(roundId: string): Promise<PacketRecord | undefined> {
     if (!this.configured) return undefined;
-    const rows = await this.database.query<PacketRow>(`SELECT id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at
-      FROM packet_records WHERE round_id = $1 ORDER BY created_at DESC LIMIT 1`, [this.roundDatabaseId]);
+    const rows = await this.database.query<PacketRow>(`SELECT id, round_id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at
+      FROM packet_records WHERE round_id = $1 ORDER BY created_at DESC LIMIT 1`, [this.databaseRoundId(roundId)]);
     return rows[0] ? packetRecord(rows[0], roundId) : undefined;
   }
 
   async claimInternalPacket(input: { packetId: string; serverSeed: string; roundId: string; userId: string; claimSequence: number }): Promise<PacketClaim> {
     if (!this.configured) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Persistent packet storage is not configured");
     return this.database.transaction(async (client) => {
-      const packetRows = await client.query<PacketRow>(`SELECT id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at
+      const packetRows = await client.query<PacketRow>(`SELECT id, round_id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at
         FROM packet_records WHERE id = $1::uuid FOR UPDATE`, [input.packetId]);
       const row = packetRows.rows[0];
       if (!row) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Internal packet not found");
@@ -173,6 +246,9 @@ export class ApiPersistence implements PacketStore {
       const identity = await client.query<{ user_id: string }>("SELECT user_id FROM telegram_identities WHERE telegram_user_id = $1", [input.userId]);
       const userId = identity.rows[0]?.user_id;
       if (!userId) throw new PacketProviderError("AUTHORIZATION_REQUIRED", "Telegram identity is not persisted");
+      const allocation = await client.query<{ claim_status: "ELIGIBLE" | "CLAIMED" | "AUTO_CLAIMED" | "EXPIRED" }>("SELECT claim_status FROM packet_allocations WHERE packet_id = $1::uuid AND user_id = $2::uuid FOR UPDATE", [input.packetId, userId]);
+      if (!allocation.rows[0]) throw new PacketProviderError("ROUND_PARTICIPANT_REQUIRED", "Only successful bettors can claim this internal packet");
+      if (allocation.rows[0].claim_status !== "ELIGIBLE") throw new PacketProviderError("ALREADY_CLAIMED", "You have already claimed this internal packet");
       const claimRows = await client.query<{ user_id: string; demo_value: string | number; claim_sequence: string | number; created_at: string | Date }>(`SELECT ti.telegram_user_id AS user_id, cr.demo_value, cr.claim_sequence, cr.created_at
         FROM claim_records cr JOIN telegram_identities ti ON ti.user_id = cr.user_id WHERE cr.packet_id = $1::uuid ORDER BY cr.claim_sequence ASC`, [input.packetId]);
       if (claimRows.rows.some((claim) => claim.user_id === input.userId)) throw new PacketProviderError("ALREADY_CLAIMED", "You have already claimed this internal packet");
@@ -186,24 +262,25 @@ export class ApiPersistence implements PacketStore {
       const remainingAmount = totalAmount - claimedAmount;
       const value = remainingClaims === 1 ? remainingAmount : demoPacketValue(input.serverSeed, input.roundId, input.userId, claimSequence, 1, remainingAmount - (remainingClaims - 1));
       const inserted = await client.query<{ created_at: string | Date }>(`INSERT INTO claim_records (packet_id, round_id, user_id, claim_sequence, demo_value)
-        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5) ON CONFLICT (round_id, user_id, claim_sequence) DO NOTHING RETURNING created_at`, [input.packetId, this.roundDatabaseId, userId, claimSequence, value]);
+        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5) ON CONFLICT (round_id, user_id, claim_sequence) DO NOTHING RETURNING created_at`, [input.packetId, this.databaseRoundId(input.roundId), userId, claimSequence, value]);
       if (!inserted.rows[0]) throw new PacketProviderError("ALREADY_CLAIMED", "This packet claim has already been recorded");
       const claimedAt = iso(inserted.rows[0].created_at);
       const nextClaimedAmount = claimedAmount + value;
       const nextClaimedCount = claimedCount + 1;
       await client.query("UPDATE packet_records SET claimed_amount = $2, claimed_count = $3 WHERE id = $1::uuid", [input.packetId, nextClaimedAmount, nextClaimedCount]);
+      await client.query("UPDATE packet_allocations SET claim_status = 'CLAIMED', claimed_at = $3 WHERE packet_id = $1::uuid AND user_id = $2::uuid", [input.packetId, userId, claimedAt]);
       return { packetId: input.packetId, userId: input.userId, value, claimedAt, claimSequence, label: "PROJECT 12 INTERNAL CREDIT · NO CASH VALUE", totalAmount, maxClaims, claimedAmount: nextClaimedAmount, claimedCount: nextClaimedCount, remainingAmount: totalAmount - nextClaimedAmount, remainingClaims: maxClaims - nextClaimedCount };
     });
   }
 
   async getInternalPacketClaims(packetId: string): Promise<PacketClaim[]> {
     if (!this.configured) return [];
-    const packetRows = await this.database.query<PacketRow>("SELECT id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at FROM packet_records WHERE id = $1::uuid", [packetId]);
+    const packetRows = await this.database.query<PacketRow>("SELECT id, round_id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at FROM packet_records WHERE id = $1::uuid", [packetId]);
     const row = packetRows[0];
     if (!row) return [];
     const claims = await this.database.query<{ user_id: string; value: string | number; claim_sequence: string | number; created_at: string | Date }>(`SELECT ti.telegram_user_id AS user_id, cr.demo_value AS value, cr.claim_sequence, cr.created_at
       FROM claim_records cr JOIN telegram_identities ti ON ti.user_id = cr.user_id WHERE cr.packet_id = $1::uuid ORDER BY cr.claim_sequence ASC`, [packetId]);
-    const packet = packetRecord(row, "R-0247");
+    const packet = packetRecord(row, row.round_id ?? this.roundDatabaseId);
     let claimedAmount = 0;
     return claims.map((claim, index) => {
       const value = Number(claim.value);
@@ -215,10 +292,10 @@ export class ApiPersistence implements PacketStore {
   async cancelInternalPacket(packetId: string): Promise<PacketRecord> {
     if (!this.configured) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Persistent packet storage is not configured");
     const rows = await this.database.query<PacketRow>(`UPDATE packet_records SET cancelled_at = COALESCE(cancelled_at, now()) WHERE id = $1::uuid
-      RETURNING id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at`, [packetId]);
+      RETURNING id, round_id, provider, total_amount, max_claims, claimed_amount, claimed_count, created_at, expires_at, cancelled_at`, [packetId]);
     const row = rows[0];
     if (!row) throw new PacketProviderError("PROVIDER_NOT_CONFIGURED", "Internal packet not found");
-    return packetRecord(row, "R-0247");
+    return packetRecord(row, row.round_id ?? this.roundDatabaseId);
   }
 
   private async run<T>(work: () => Promise<T>): Promise<T | undefined> {
@@ -355,19 +432,55 @@ export class ApiPersistence implements PacketStore {
   }
 
   async persistBankerBid(telegramUserId: string, amount: number): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO banker_bids (round_id, user_id, amount) SELECT $1, u.id, $3 FROM users u WHERE u.internal_uid IN ($2, CONCAT('TG-', $2)) ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [this.roundDatabaseId, telegramUserId, amount]).then(() => undefined));
+    await this.run(() => this.database.transaction(async (client) => {
+      await client.query("INSERT INTO banker_bids (round_id, user_id, amount) SELECT $1, ti.user_id, $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [this.roundDatabaseId, telegramUserId, amount]);
+      await client.query(`INSERT INTO round_participants (round_id, user_id, role, status, bet_amount)
+        SELECT $1, ti.user_id, 'BANKER', 'ELIGIBLE', NULL FROM telegram_identities ti WHERE ti.telegram_user_id = $2
+        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'BANKER', status = 'ELIGIBLE'`, [this.roundDatabaseId, telegramUserId]);
+    }));
+  }
+
+  async listBankerBids(): Promise<Array<{ userId: string; amount: number; serverReceivedAt: string }>> {
+    if (!this.configured) return [];
+    const rows = await this.database.query<{ telegram_user_id: string; amount: string | number; created_at: string | Date }>(`SELECT ti.telegram_user_id, bb.amount, bb.created_at
+      FROM banker_bids bb JOIN telegram_identities ti ON ti.user_id = bb.user_id
+      WHERE bb.round_id = $1 ORDER BY bb.amount DESC, bb.created_at ASC, bb.id ASC`, [this.roundDatabaseId]);
+    return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount), serverReceivedAt: new Date(row.created_at).toISOString() }));
+  }
+
+  async persistRoundBanker(telegramUserId: string): Promise<void> {
+    await this.run(() => this.database.query(`UPDATE rounds SET banker_user_id = (SELECT user_id FROM telegram_identities WHERE telegram_user_id = $2) WHERE id = $1`, [this.roundDatabaseId, telegramUserId]).then(() => undefined));
   }
 
   async persistBet(telegramUserId: string, amount: number): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO bets (round_id, user_id, bet_sequence, amount) SELECT $1, ti.user_id, COALESCE((SELECT max(bet_sequence) + 1 FROM bets b WHERE b.round_id = $1 AND b.user_id = ti.user_id), 1), $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, bet_sequence) DO NOTHING", [this.roundDatabaseId, telegramUserId, amount]).then(() => undefined));
+    await this.run(() => this.database.transaction(async (client) => {
+      await client.query("INSERT INTO bets (round_id, user_id, bet_sequence, amount) SELECT $1, ti.user_id, COALESCE((SELECT max(bet_sequence) + 1 FROM bets b WHERE b.round_id = $1 AND b.user_id = ti.user_id), 1), $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, bet_sequence) DO NOTHING", [this.roundDatabaseId, telegramUserId, amount]);
+      await client.query(`INSERT INTO round_participants (round_id, user_id, role, status, bet_amount)
+        SELECT $1, ti.user_id, 'PLAYER', 'ELIGIBLE', SUM(b.amount) FROM telegram_identities ti
+        JOIN bets b ON b.user_id = ti.user_id AND b.round_id = $1
+        WHERE ti.telegram_user_id = $2 GROUP BY ti.user_id
+        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'PLAYER', status = 'ELIGIBLE', bet_amount = EXCLUDED.bet_amount`, [this.roundDatabaseId, telegramUserId]);
+    }));
   }
 
   async listRoundBettors(): Promise<Array<{ userId: string; amount: number }>> {
     if (!this.configured) return [];
-    const rows = await this.database.query<{ telegram_user_id: string; amount: string | number }>(`SELECT ti.telegram_user_id, SUM(b.amount) AS amount
-      FROM bets b JOIN telegram_identities ti ON ti.user_id = b.user_id
-      WHERE b.round_id = $1 GROUP BY ti.telegram_user_id ORDER BY MIN(b.created_at), MIN(b.id)`, [this.roundDatabaseId]);
+    const rows = await this.database.query<{ telegram_user_id: string; amount: string | number }>(`SELECT ti.telegram_user_id, COALESCE(rp.bet_amount, 0) AS amount
+      FROM round_participants rp JOIN telegram_identities ti ON ti.user_id = rp.user_id
+      WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status IN ('ELIGIBLE', 'CLAIMED', 'AUTO_CLAIMED')
+      ORDER BY rp.joined_at, rp.id`, [this.roundDatabaseId]);
     return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount) }));
+  }
+
+  async persistPacketAllocations(packetId: string, bettors: Array<{ userId: string; amount: number }>): Promise<void> {
+    await this.run(() => this.database.transaction(async (client) => {
+      for (const bettor of bettors) {
+        await client.query(`INSERT INTO packet_allocations (round_id, packet_id, user_id, allocation_amount, claim_status)
+          SELECT p.round_id, p.id, ti.user_id, NULL, 'ELIGIBLE' FROM packet_records p
+          JOIN telegram_identities ti ON ti.telegram_user_id = $2 WHERE p.id = $1::uuid
+          ON CONFLICT (round_id, user_id) DO UPDATE SET packet_id = EXCLUDED.packet_id, claim_status = 'ELIGIBLE', claimed_at = NULL`, [packetId, bettor.userId]);
+      }
+    }));
   }
 
   async persistPacket(provider: string, serverSeedHash: string, serverSeed?: string): Promise<void> {
