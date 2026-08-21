@@ -23,11 +23,20 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   await expect(page.locator(".topbar-title h1")).toContainText("十二牛牛游戏群");
   await expect(page.locator(".chat-room-head p")).toHaveText("平台通知、抢庄、下注和红包领取都会在这里留下记录。普通聊天和游戏操作都通过这里输入。");
   await expect(page.getByRole("textbox", { name: "我的聊天" })).toBeVisible();
+  await expect(page.locator(".chat-text-mode")).toContainText("纯文字聊天室");
   await expect(page.locator(".chat-composer-hint")).toHaveText("聊天室输入数字或“抢庄 600” · 输入“结束抢庄”进入下注");
   await expect(page.locator(".chat-command-row")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "100", exact: true })).toHaveCount(0);
   await expect(page.locator(".chat-screen button").filter({ hasText: /抢庄|下注|发包|红包|确认/ })).toHaveCount(0);
   await expect(page.locator(".chat-packet-card button")).toHaveCount(0);
+  for (const route of ["/game/12", "/rooms/room-12", "/rounds/R-0247"]) {
+    await page.evaluate((nextRoute) => { window.history.pushState({}, "", nextRoute); window.dispatchEvent(new PopStateEvent("popstate")); }, route);
+    await expect(page.locator('[data-chat-mode="text-only"]')).toBeVisible();
+    await expect(page.locator('[data-game-input="chat-text-only"]')).toBeVisible();
+    await expect(page.locator('[data-chat-command-input="true"]')).toBeVisible();
+    await expect(page.locator(".chat-screen button").filter({ hasText: /抢庄|下注|发包|红包|确认/ })).toHaveCount(0);
+    await expect(page.locator(".chat-packet-card button")).toHaveCount(0);
+  }
   await page.getByRole("textbox", { name: "我的聊天" }).fill("抢庄 600");
   await page.getByRole("textbox", { name: "我的聊天" }).press("Enter");
   await expect(page.locator(".room-message-user").last()).toContainText("抢庄 600");

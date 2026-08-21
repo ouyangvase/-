@@ -152,6 +152,8 @@ body { overflow-x: hidden; background: #000; }
 .room-message p { margin-top: 7px; color: var(--bone); font-size: 13px; line-height: 1.45; }
 .room-message small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; }
 .chat-composer { display: grid; gap: 10px; position: sticky; bottom: calc(74px + var(--safe-bottom)); z-index: 4; margin: 6px -14px 0; padding: 12px 14px; border-top: 1px solid var(--hairline); background: rgba(17,18,21,.96); backdrop-filter: blur(14px); }
+.chat-text-mode { display: flex; gap: 8px; align-items: baseline; color: var(--brass-light); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.chat-text-mode > span:last-child { color: var(--muted); letter-spacing: 0; text-transform: none; }
 .chat-composer-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .chat-input-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .chat-input-row .mechanism-input { min-height: 46px; border-radius: 999px; }
