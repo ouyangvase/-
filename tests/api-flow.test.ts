@@ -39,6 +39,13 @@ describe("API round flow", () => {
     await expect((await request("/api/verification/status", { headers: session })).json()).resolves.toMatchObject({ status: "APPROVED", canUseChat: true, canUseWallet: true });
     expect((await request("/api/chat/room", { headers: session })).status).toBe(200);
     expect((await request("/api/wallet", { headers: session })).status).toBe(200);
+    await expect((await request("/api/me", { headers: session })).json()).resolves.toMatchObject({ id: "demo-player-01" });
+    expect((await request("/api/hall")).status).toBe(200);
+    expect((await request("/api/announcements")).status).toBe(200);
+    expect((await request("/api/leaderboards")).status).toBe(200);
+    expect((await request("/api/referral", { headers: session })).status).toBe(200);
+    expect((await request("/api/referrals/tree", { headers: session })).status).toBe(200);
+    expect((await request("/api/rewards/daily", { headers: session })).status).toBe(200);
   });
 
   it("persists the user-visible round sequence through the API boundary", async () => {

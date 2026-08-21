@@ -116,8 +116,12 @@ function localizedRoomMessage(message: ChatMessage, t: ReturnType<typeof createT
     case "game.banker.started": return t("game.banker.started");
     case "game.banker.confirmed": return t("game.banker.confirmed", { banker: stringValue("banker", message.actor ?? "—") });
     case "game.packet.ready": return t("game.packet.ready");
+    case "game.packet.pending": return t("game.packet.pending", { bettorCount: numberValue("bettorCount", 0) });
+    case "game.packet.sent": return t("game.packet.sent", { bettorCount: numberValue("bettorCount", 0) });
     case "game.packet.claimed": return t("game.packet.claimed", { amount: numberValue("amount", 0) });
+    case "game.packet.claimedBy": return t("game.packet.claimedBy", { player: stringValue("player", message.actor ?? "Player") });
     case "game.packet.expired": return t("game.packet.expired");
+    case "game.settlement.complete": return t("game.settlement.complete");
     case "game.results.published": {
       const results = Array.isArray(payload.results) ? payload.results as Array<Record<string, unknown>> : [];
       if (results.length === 0) return t("game.results.published");

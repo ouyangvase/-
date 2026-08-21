@@ -73,9 +73,13 @@ const englishMessages = {
   "game.banker.confirmPacket": "Confirm packet",
   "game.banker.close": "End banker bidding",
   "game.packet.ready": "Your internal packet is ready",
+  "game.packet.pending": "Betting closed. {bettorCount} players are recorded; the banker must confirm the internal packet.",
+  "game.packet.sent": "The banker confirmed an internal packet for {bettorCount} bettors. Spectators do not receive a claim entry.",
   "game.packet.claimed": "Packet opened: RM {amount}",
+  "game.packet.claimedBy": "{player} opened a packet; the round is being scored.",
   "game.packet.expired": "Packet expired; the system opened it automatically",
   "game.results.published": "Round results published",
+  "game.settlement.complete": "Round complete; the Demo ledger has been updated.",
   "game.continue": "Reply 1 to continue as banker or 0 to finish",
   "game.roundWaiting": "Waiting for the next round",
   "game.invalidBet": "This bet cannot be accepted",
@@ -278,6 +282,16 @@ const bankerConfirmLabels: Record<Locale, string> = { "zh-CN": "确认发红包"
 for (const locale of supportedLocales) (supplementalMessages[locale] ??= {})["game.banker.confirmPacket"] = bankerConfirmLabels[locale];
 const bankerCloseLabels: Record<Locale, string> = { "zh-CN": "结束抢庄", "zh-TW": "結束搶莊", en: "End banker bidding", ms: "Tamatkan bidaan banker", th: "จบการประมูลเจ้ามือ", vi: "Kết thúc đấu giá nhà cái", id: "Akhiri penawaran banker", ta: "வங்கி ஏலத்தை முடி", my: "ဘဏ်ကာလေလံပိတ်", km: "បញ្ចប់ការដេញថ្លៃធនាគារ", hi: "बैंकर बोली समाप्त करें", ar: "إنهاء مزاد المصرف", ja: "親決めを終了", ko: "뱅커 입찰 종료", fil: "Tapusin ang banker bidding" };
 for (const locale of supportedLocales) (supplementalMessages[locale] ??= {})["game.banker.close"] = bankerCloseLabels[locale];
+const packetSystemMessages: Record<Locale, Partial<Record<TranslationKey, string>>> = {
+  "zh-CN": { "game.packet.pending": "下注结束，已记录 {bettorCount} 位下注玩家；请庄家确认发红包。", "game.packet.sent": "庄家已向 {bettorCount} 位下注玩家私发内部红包，旁观者不会收到领取入口。", "game.packet.claimedBy": "{player} 已领取红包，正在算牌。", "game.settlement.complete": "本局完成，Demo 账本已更新。" },
+  "zh-TW": { "game.packet.pending": "下注結束，已記錄 {bettorCount} 位下注玩家；請莊家確認發紅包。", "game.packet.sent": "莊家已向 {bettorCount} 位下注玩家私發內部紅包，旁觀者不會收到領取入口。", "game.packet.claimedBy": "{player} 已領取紅包，正在算牌。", "game.settlement.complete": "本局完成，Demo 帳本已更新。" },
+  en: { "game.packet.pending": "Betting closed. {bettorCount} players are recorded; the banker must confirm the internal packet.", "game.packet.sent": "The banker confirmed an internal packet for {bettorCount} bettors. Spectators do not receive a claim entry.", "game.packet.claimedBy": "{player} opened a packet; the round is being scored.", "game.settlement.complete": "Round complete; the Demo ledger has been updated." },
+  ms: { "game.packet.pending": "Pertaruhan ditutup. {bettorCount} pemain direkodkan; banker perlu mengesahkan sampul dalaman.", "game.packet.sent": "Banker mengesahkan sampul dalaman untuk {bettorCount} pemain. Penonton tidak menerima pintu tuntutan.", "game.packet.claimedBy": "{player} membuka sampul; pusingan sedang dikira.", "game.settlement.complete": "Pusingan selesai; lejar Demo telah dikemas kini." },
+  th: { "game.packet.pending": "ปิดเดิมพันแล้ว บันทึกผู้เล่น {bettorCount} คน โปรดยืนยันซองภายในโดยเจ้ามือ", "game.packet.sent": "เจ้ามือยืนยันซองภายในสำหรับผู้เดิมพัน {bettorCount} คน ผู้ชมจะไม่มีทางเปิดซอง", "game.packet.claimedBy": "{player} เปิดซองแล้ว กำลังคำนวณผล", "game.settlement.complete": "จบรอบแล้ว อัปเดตบัญชี Demo แล้ว" },
+  vi: { "game.packet.pending": "Đã đóng cược. Đã ghi nhận {bettorCount} người chơi; nhà cái cần xác nhận bao nội bộ.", "game.packet.sent": "Nhà cái đã xác nhận bao nội bộ cho {bettorCount} người cược. Người xem không nhận được mục nhận.", "game.packet.claimedBy": "{player} đã mở bao; vòng chơi đang được tính.", "game.settlement.complete": "Vòng chơi hoàn tất; sổ cái Demo đã được cập nhật." },
+  id: {}, ta: {}, my: {}, km: {}, hi: {}, ar: {}, ja: {}, ko: {}, fil: {}
+};
+for (const locale of supportedLocales) Object.assign(supplementalMessages[locale] ??= {}, packetSystemMessages[locale]);
 
 const messages: Record<Locale, Messages> = Object.fromEntries(
   supportedLocales.map((locale) => [locale, { ...englishMessages, ...baseMessages[locale], ...extendedLocaleMessages[locale], ...additionalLocaleMessages[locale], ...supplementalMessages[locale] }])
