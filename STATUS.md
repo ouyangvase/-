@@ -39,7 +39,7 @@ Current implementation gap for this goal:
 - The internal chat game path is implemented in Demo mode: verified users control the round only by sending text in the room. Numeric and natural commands such as `抢庄 600`, `下注 5`, `sh10`/`梭哈 50`, `封盘`, `确认发包`, `/重推`, `抢红包`/`claim`, and the `1`/`0` continuation commands are parsed server-side; there are no game-action buttons. `封盘` moves the round to `WAITING_BANKER_CONFIRM`, and the current banker must explicitly send `确认发包` (or its supported aliases) before the internal packet is created. Only recorded bettors receive the private packet card and claim eligibility; spectators receive no claim entry point.
 - Banker bidding is server-authoritative: each player's latest bid is retained, the highest bid wins with server receipt ordering for ties, only the current highest bidder can close bidding, and the Worker auto-advance writes a public platform notice plus `INTERNAL_CHAT_MESSAGE` outbox event when a deadline closes banker bidding or betting.
 - Locale preference is validated server-side, persisted for Telegram users, and used as the payload locale for verification approval notifications.
-- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_8tEAz9oxeGHKpHW7sK1YuYoV9tnK`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
+- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_1283RViHfHPsGDZXHGZgMX8i7Fv6`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
 - Fresh final branch Preview after natural chat command support: `https://project-12-demo-staging-public-fi329z3bi-tomupros-projects.vercel.app` (`dpl_H7FCgDYF2jYAYeMLWw8WpVUHY4Mx`). Anonymous `/` and `/api/health` both return 200; health reports `mode=demo`, `realMoneyDisabled=true`, `bot=blocked`, `database=disabled`.
 - Historical Demo KYC persistence deployment: production `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U`, aliased to `https://project-12-demo-staging-public.vercel.app`. In stateless Demo mode, the default feature-preview account `demo-player-01` deterministically reports `APPROVED` so a cold Vercel instance does not return the user to the KYC modal; real persisted KYC is unchanged.
 - Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker claims the outbox, writes heartbeats and advances safe expired round states with Postgres advisory locks. It is optional by default and is enforced only when `REQUIRE_WORKER=true`.
@@ -57,7 +57,7 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 ### Latest goal-turn verification (2026-08-21)
 
-- This turn aligned the Mini App composer with the canonical `POST /api/chat/rooms/room-12/messages` route and verified the full typed `下注 5` path; no game-action buttons were added.
+- This turn aligned the Mini App composer with the canonical `POST /api/chat/rooms/room-12/messages` route, verified the full typed `下注 5` path, and restored persisted round bettors into the realtime participant-permission cache after cold starts; no game-action buttons were added.
 - `pnpm test`: 10 files, 51 tests passed.
 - `pnpm typecheck`: passed.
 - `pnpm build`: Mini App, Admin, API, Worker and Bot passed.
@@ -65,7 +65,7 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 - `pnpm test:e2e`: 13 passed, 5 skipped by the existing duplicate visual-project policy.
 - Public read-only smoke on `https://project-12-demo-staging-public.vercel.app`: homepage, health, auth, verification submit/status, hall, announcements, chat rooms, chat messages, wallet, leaderboard, daily rewards and chat read all returned 200.
 - Public health summary: `mode=demo`, `realMoneyDisabled=true`; authentication mode is `mock` and the smoke used the deterministic Demo preview account only.
-- Latest production deployment: `dpl_8tEAz9oxeGHKpHW7sK1YuYoV9tnK`, alias `https://project-12-demo-staging-public.vercel.app`, Vercel state `READY`; health confirms `mode=demo`, `bot=blocked`, `database=disabled`, and `realMoneyDisabled=true`.
+- Latest production deployment: `dpl_1283RViHfHPsGDZXHGZgMX8i7Fv6`, alias `https://project-12-demo-staging-public.vercel.app`, Vercel state `READY`; health confirms `mode=demo`, `bot=blocked`, `database=disabled`, and `realMoneyDisabled=true`. The production bundle contains the canonical internal-chat message route and no legacy chat-command URL.
 - Latest final Preview deployment: `dpl_H7FCgDYF2jYAYeMLWw8WpVUHY4Mx`, URL `https://project-12-demo-staging-public-fi329z3bi-tomupros-projects.vercel.app`, Vercel state `READY`; health confirms `mode=demo`, `bot=blocked`, `database=disabled`, and `realMoneyDisabled=true`.
 
 | Check | Result |
