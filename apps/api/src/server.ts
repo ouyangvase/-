@@ -35,6 +35,7 @@ const deviceBindings = new Map<string, { userId: string; publicKey: string; fing
 const securityPins = new Map<string, { hash: string; changedAt: string }>();
 const onboarding = new Map<string, { deviceBound: boolean; referrerBound: boolean; pinSet: boolean; pendingReferral?: string }>();
 const verificationStates = new Map<string, VerificationSnapshot>();
+const demoVerifiedUserId = "demo-player-01";
 const roomMessages: RoomMessage[] = [
   { id: "MSG-0001", type: "SYSTEM", body: "平台通知：本房间使用内部 Demo 红包，积分无现金价值。", createdAt: now(), payload: {} },
   { id: "MSG-0002", type: "ROUND", body: "平台通知：回合 R-0247 已开启，等待玩家抢庄。", createdAt: now(), payload: { roundId: "R-0247" } },
@@ -184,6 +185,11 @@ async function verificationState(userId: string): Promise<VerificationSnapshot> 
   if (cached) return cached;
   const persisted = await persistence.loadVerification(userId);
   if (persisted) { verificationStates.set(userId, persisted); return persisted; }
+  if (appMode === "demo" && !persistence.configured && userId === demoVerifiedUserId) {
+    const approved: VerificationSnapshot = { status: "APPROVED", submittedAt: "2026-08-21T00:00:00.000Z", tngAccountLast4: "••••3123" };
+    verificationStates.set(userId, approved);
+    return approved;
+  }
   const initial: VerificationSnapshot = { status: "NOT_SUBMITTED" };
   verificationStates.set(userId, initial);
   return initial;
