@@ -2,6 +2,7 @@
 
 ## New-goal blockers (2026-08-21)
 
+- The latest Vercel deployment is publicly reachable and the read-only API smoke passed, but it remains a Demo deployment: health reports `mode=demo`, authentication uses the mock branch, the database is disabled, and real-money operations remain disabled.
 - Real Telegram Gate A is blocked by missing owner-supplied Bot token and BotFather configuration; the existing external `@onetwogaming_bot` cannot be used or rewired.
 - Supabase project reference `xytaavjiszdjumbaqapx` is known, but a dashboard URL is not a server credential. No service key or database connection string has been written into this workspace.
 - The current branch is still a safe Demo runtime. It must not be described as a production wallet, payment or cash-redemption system.

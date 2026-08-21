@@ -509,7 +509,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
        });
      }
      const chatReadAlias = /^\/api\/chat\/rooms\/([^/]+)\/read$/.exec(originalPath);
-     if (request.method === "POST" && chatReadAlias?.[1] === "room-12") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, () => { audit(identity.userId, "ROOM_MESSAGES_READ", "ROOM", "room-12"); return { roomId: "room-12", readAt: now() }; }); }
+      if (request.method === "POST" && chatReadAlias?.[1] === "room-12") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, async () => { const data = await body(request); const lastMessageId = typeof data.lastMessageId === "string" ? data.lastMessageId : undefined; await persistence.persistRoomRead(undefined, identity.userId, lastMessageId); audit(identity.userId, "ROOM_MESSAGES_READ", "ROOM", "room-12", undefined, { lastMessageId }); return { roomId: "room-12", readAt: now(), lastMessageId }; }); }
     if (request.method === "POST" && url.pathname === "/api/rooms/room-12/join") { const identity = requirePlayer(request, response); return identity ? writeIdempotent(request, response, () => { audit(identity.userId, "ROOM_JOINED", "ROOM", "room-12"); return { roomId: "room-12", roundId: state.round.id, joined: true, label: "DEMO PLAYER" }; }) : undefined; }
     if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}`) return json(response, 200, state.round);
     if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/events`) return json(response, 200, roundEvents);

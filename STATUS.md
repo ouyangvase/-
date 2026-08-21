@@ -54,6 +54,17 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 ## Verification evidence
 
+### Latest goal-turn verification (2026-08-21)
+
+- `pnpm test`: 10 files, 50 tests passed.
+- `pnpm typecheck`: passed.
+- `pnpm build`: Mini App, Admin, API, Worker and Bot passed.
+- `pnpm vercel:build`: passed; the bundled API emits only the existing non-blocking CJS `import.meta` warnings.
+- `pnpm test:e2e`: 13 passed, 5 skipped by the existing duplicate visual-project policy.
+- Public read-only smoke on `https://project-12-demo-staging-public.vercel.app`: homepage, health, auth, verification submit/status, hall, announcements, chat rooms, chat messages, wallet, leaderboard, daily rewards and chat read all returned 200.
+- Public health summary: `mode=demo`, `realMoneyDisabled=true`; authentication mode is `mock` and the smoke used the deterministic Demo preview account only.
+- Latest production deployment: `dpl_21J4Yi6chy9Lsxj7q2MJ411DPCLB`, alias `https://project-12-demo-staging-public.vercel.app`, Vercel state `READY`.
+
 | Check | Result |
 |---|---|
 | `pnpm test` | 10 files, 49 passed |

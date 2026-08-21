@@ -87,6 +87,13 @@ describe("API round flow", () => {
     const rooms = await request("/api/chat/rooms", { headers: session });
     expect(rooms.status).toBe(200);
     expect((await rooms.json())[0].roundId).toBe("R-0247");
+    const read = await request("/api/chat/rooms/room-12/read", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "api-flow-chat-read", ...session },
+      body: JSON.stringify({ lastMessageId: "not-a-uuid" })
+    });
+    expect(read.status).toBe(200);
+    expect((await read.json()).result).toMatchObject({ roomId: "room-12", lastMessageId: "not-a-uuid" });
     const bankerAuth = await request("/api/auth/telegram", {
       method: "POST",
       headers: { "content-type": "application/json" },

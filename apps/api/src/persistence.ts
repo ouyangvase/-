@@ -189,6 +189,15 @@ export class ApiPersistence implements PacketStore {
     return rows.reverse().map((row) => ({ id: row.id, type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {}, ...(row.template_key ? { templateKey: row.template_key } : {}), visibility: row.visibility ?? "PUBLIC_ROOM", ...(row.target_user_id ? { targetUserId: row.target_user_id } : {}) }));
   }
 
+  async persistRoomRead(roundId: string | undefined, telegramUserId: string, lastMessageId?: string): Promise<void> {
+    const messageId = lastMessageId && uuidPattern.test(lastMessageId) ? lastMessageId : null;
+    await this.run(() => this.database.query(`INSERT INTO chat_message_reads (room_id, user_id, last_read_message_id, updated_at)
+      SELECT r.room_id, ti.user_id, $3::uuid, now()
+      FROM rounds r JOIN telegram_identities ti ON ti.telegram_user_id = $2
+      WHERE r.id = $1
+      ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_message_id = EXCLUDED.last_read_message_id, updated_at = now()`, [this.databaseRoundId(roundId), telegramUserId, messageId]).then(() => undefined));
+  }
+
   async loadUserRuntime(telegramUserId: string): Promise<UserRuntimeSnapshot | undefined> {
     if (!this.configured) return undefined;
     const rows = await this.database.query<{ display_name: string; available: string | number; locked: string | number; banker_pool: string | number; device_bound: boolean; referrer_bound: boolean; pin_set: boolean }>(`SELECT u.display_name,
