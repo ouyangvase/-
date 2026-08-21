@@ -45,6 +45,9 @@ describe("internal chat game commands", () => {
     expect(chatMessage.status).toBe(200);
     expect((await chatMessage.json()).result.command).toBe("MESSAGE");
 
+    const shoveDuringBidding = await command(bankerSession, "sh10", "chat-command-shove-during-bidding");
+    expect(shoveDuringBidding.status).toBe(400);
+
     const bid = await command(bankerSession, "600", "chat-command-bid");
     expect(bid.status).toBe(200);
     expect((await bid.json()).result.result.state).toBe("BANKER_BIDDING");

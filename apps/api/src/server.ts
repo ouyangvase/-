@@ -26,6 +26,7 @@ const auditLogs: Array<{ id: string; actor: string; action: string; referenceTyp
 const roundEvents: Array<{ id: string; roundId: string; from?: RoundState; to: RoundState; payload: Record<string, unknown>; createdAt: string }> = [];
 const realtimeClients = new Set<ServerResponse>();
 const roomRealtimeClients = new Map<ServerResponse, string>();
+const responseCorsOrigins = new WeakMap<ServerResponse, string>();
 type AppLocale = Locale;
 const supportedLocales = new Set<AppLocale>(launchLocales);
 const preferredLocales = new Map<string, AppLocale>();
@@ -86,8 +87,15 @@ const demoAnnouncements = [
 function roomSummary() { return { id: "room-12", name: "Project 12 Social Table", players: state.round.players, state: state.round.state, roundId: state.round.id, banker: state.round.banker, bankPool: state.round.bankPool, endsAt: state.round.endsAt, minDemoCredit: 250 }; }
 function hallSnapshot() { return { room: roomSummary(), announcements: demoAnnouncements, games: [{ id: "12-niuniu", roomId: "room-12", name: "12牛牛", status: "OPEN", mode: "INTERNAL_PACKET_DEMO" }], demoOnly: appMode === "demo" }; }
 
+function corsOrigin(request: IncomingMessage): string {
+  const configured = process.env.CORS_ORIGIN?.trim();
+  if (configured) return configured;
+  const origin = header(request, "origin");
+  return origin === "http://localhost:4173" || origin === "http://127.0.0.1:4173" || origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173" ? origin : "http://localhost:4173";
+}
+
 function json(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, idempotency-key, x-demo-user, x-session-token, x-demo-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" });
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, idempotency-key, x-demo-user, x-session-token, x-demo-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" });
   response.end(status === 204 ? undefined : JSON.stringify(body));
 }
 
@@ -407,6 +415,7 @@ function telegramUpdateType(update: Record<string, unknown>): "message" | "callb
 
 export const apiHandler = async (request: IncomingMessage, response: ServerResponse) => {
   try {
+    responseCorsOrigins.set(response, corsOrigin(request));
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     const originalPath = url.pathname;
     let forcedVerificationStatus: Exclude<VerificationSnapshot["status"], "NOT_SUBMITTED"> | undefined;
@@ -462,7 +471,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "GET" && url.pathname === "/api/rooms") return json(response, 200, [roomSummary()]);
     if (request.method === "GET" && url.pathname === "/api/rooms/room-12") return json(response, 200, roomSummary());
      if (request.method === "GET" && url.pathname === "/api/chat/room") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; const before = url.searchParams.get("before") || undefined; const limit = before ? 30 : 50; const messages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, before, limit) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).slice(-(before ? 30 : 50)); return json(response, 200, { roomId: "room-12", roomName: "十二牛牛游戏群", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool, messages, hasMore: messages.length === limit }); }
-     if (request.method === "GET" && url.pathname === "/api/chat/room/realtime") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); const messages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, undefined, 50) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).slice(-50); for (const message of messages) writeRoomEvent(response, message); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } roomRealtimeClients.set(response, identity.userId); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); roomRealtimeClients.delete(response); }); return; }
+     if (request.method === "GET" && url.pathname === "/api/chat/room/realtime") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); const messages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, undefined, 50) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).slice(-50); for (const message of messages) writeRoomEvent(response, message); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } roomRealtimeClients.set(response, identity.userId); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); roomRealtimeClients.delete(response); }); return; }
      if (request.method === "POST" && url.pathname === "/api/chat/room/command") {
        const identity = await requireVerifiedPlayer(request, response);
        if (!identity) return undefined;
@@ -470,7 +479,8 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
          const data = await body(request);
           const text = typeof data.text === "string" ? data.text.trim().slice(0, 240) : typeof data.body === "string" ? data.body.trim().slice(0, 240) : "";
          if (!text) throw new Error("请输入聊天消息或游戏指令");
-         const numeric = /^(?:sh\s*)?(\d+)$/.exec(text.toLowerCase());
+          const numeric = /^(?:sh\s*)?(\d+)$/.exec(text.toLowerCase());
+          const bankerNumeric = /^(\d+)$/.exec(text);
           const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价)$/i.test(text);
           const closeCommand = /^(?:stop|close|停止下注|结束下注)$/i.test(text);
           const restartCommand = /^(?:\/重推|重推|restart|reopen)$/i.test(text);
@@ -486,8 +496,8 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
             addRoomMessage("ROUND", "本桌已结束，感谢参与。", { templateKey: "game.table.ended", roundId: state.round.id });
             return { command: "END_TABLE", result: { state: state.round.state, ended: true } };
           }
-         if (numeric && state.round.state === "BANKER_BIDDING") {
-           const amount = Number(numeric[1]);
+          if (bankerNumeric && state.round.state === "BANKER_BIDDING") {
+            const amount = Number(bankerNumeric[1]);
            const result = await executeBid(identity, key, amount);
            addRoomMessage("USER", text, { command: "BID", amount }, identity.userId);
            return { command: "BID", result };
@@ -549,7 +559,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "POST" && url.pathname === "/api/rooms/room-12/join") { const identity = requirePlayer(request, response); return identity ? writeIdempotent(request, response, () => { audit(identity.userId, "ROOM_JOINED", "ROOM", "room-12"); return { roomId: "room-12", roundId: state.round.id, joined: true, label: "DEMO PLAYER" }; }) : undefined; }
     if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}`) return json(response, 200, state.round);
     if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/events`) return json(response, 200, roundEvents);
-    if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/realtime`) { response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); for (const event of [...roundEvents].reverse()) writeRoundEvent(response, event); response.write(`event: snapshot\ndata: ${JSON.stringify({ round: state.round, outboxPending: outboxEvents.filter((event) => !event.publishedAt).length })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } realtimeClients.add(response); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); realtimeClients.delete(response); }); return; }
+    if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/realtime`) { response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); for (const event of [...roundEvents].reverse()) writeRoundEvent(response, event); response.write(`event: snapshot\ndata: ${JSON.stringify({ round: state.round, outboxPending: outboxEvents.filter((event) => !event.publishedAt).length })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } realtimeClients.add(response); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); realtimeClients.delete(response); }); return; }
     if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/fairness`) return json(response, 200, { ruleVersion: demoRules.id, seedHash: hashSeed(serverSeed), revealed: ["ROUND_COMPLETE", "REFUNDED"].includes(state.round.state), serverSeed: ["ROUND_COMPLETE", "REFUNDED"].includes(state.round.state) ? serverSeed : undefined, inputTemplate: `${state.round.id}:<userId>:<claimSequence>` });
      if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/settlement`) return json(response, 200, { roundId: state.round.id, state: state.round.state, ledger: state.ledger.slice(0, 5), events: roundEvents.slice(0, 10), results: roundResults.get(state.round.id) ?? [], demoOnly: true });
      if (request.method === "GET" && url.pathname === `/api/rounds/${state.round.id}/results`) { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; return json(response, 200, { roundId: state.round.id, state: state.round.state, banker: state.round.banker, results: roundResults.get(state.round.id) ?? [], visible: Boolean(roundResults.get(state.round.id)) }); }
