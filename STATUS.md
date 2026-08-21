@@ -18,6 +18,7 @@ Safety state at start of this goal:
 Current implementation gap for this goal:
 
 - The Mini App now has an authenticated internal chat feed with numeric banker/bet commands, `shN`, close-betting, SSE delivery and participant-only packet access; the UI is still a compact reference-derived implementation rather than a pixel copy of the supplied Telegram screenshots.
+- The chat room is now explicitly chat-only for gameplay: one native message composer accepts ordinary chat and every game command, Enter submits it, and the visible Send control only submits that message. There are no banker, bet, confirm, or packet-opening action buttons; packet cards are non-interactive and eligible players type the claim command.
 - Existing round APIs and worker contain demo-safe primitives for bids, bets, packets, claims and settlement; the chat command parser now supports multiple banker bids, highest-bid close permission, explicit packet confirmation and persisted Worker-generated room notices. The production worker loop still needs external database credentials and deployment verification.
 - Fifteen selectable locale dictionaries are implemented (`zh-CN`, `zh-TW`, `en`, `ms`, `th`, `vi`, `id`, `ta`, `my`, `km`, `hi`, `ar`, `ja`, `ko`, `fil`), the Mini App stores the preference in local storage plus `user_profiles.locale`, and approval/packet Bot events carry a locale when produced by the API. The five newest locales have concrete core-game copy, Arabic switches the document to RTL, and low-frequency legacy copy still uses the English fallback until native review.
 - Supabase/Postgres migrations and adapters now include the locale constraint and `room_messages` Realtime publication preparation, but this workspace is not connected to the supplied Supabase project yet.
@@ -38,9 +39,9 @@ Current implementation gap for this goal:
 - The internal chat game path is implemented in Demo mode: verified users control the round only by sending text in the room. Numeric banker bids, `2–17` bets, `shN`/`sh N` bets, `停止下注`, `确认发包`/`确认发红包`, `/重推`, `抢红包`/`claim`, and the `1`/`0` continuation commands are parsed server-side; there are no game-action buttons. `停止下注` moves the round to `WAITING_BANKER_CONFIRM`, and the current banker must explicitly send `确认发包` (or its supported aliases) before the internal packet is created. Only recorded bettors receive the private packet card and claim eligibility; spectators receive no claim entry point.
 - Banker bidding is server-authoritative: each player's latest bid is retained, the highest bid wins with server receipt ordering for ties, only the current highest bidder can close bidding, and the Worker auto-advance writes a public platform notice plus `INTERNAL_CHAT_MESSAGE` outbox event when a deadline closes banker bidding or betting.
 - Locale preference is validated server-side, persisted for Telegram users, and used as the payload locale for verification approval notifications.
-- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_5mq5xCscPupyHn4uGsLPmxQRTzBw`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
+- The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_8fZ8CeRPuvTmFiL1jauufAm2R4d7`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
 - Fresh branch Preview after the banker-flow fix: `https://project-12-demo-staging-public-97e4h71se-tomupros-projects.vercel.app` (`dpl_37zjdKkS7LKQahfQu2wxJse4GHvG`). Anonymous `/` and `/api/health` both return 200; health reports `mode=demo`, `realMoneyDisabled=true`, `bot=blocked`, `database=disabled`.
-- Latest deployment after the Demo KYC persistence fix: production `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U`, aliased to `https://project-12-demo-staging-public.vercel.app`. In stateless Demo mode, the default feature-preview account `demo-player-01` deterministically reports `APPROVED` so a cold Vercel instance does not return the user to the KYC modal; real persisted KYC is unchanged.
+- Historical Demo KYC persistence deployment: production `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U`, aliased to `https://project-12-demo-staging-public.vercel.app`. In stateless Demo mode, the default feature-preview account `demo-player-01` deterministically reports `APPROVED` so a cold Vercel instance does not return the user to the KYC modal; real persisted KYC is unchanged.
 - Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker claims the outbox, writes heartbeats and advances safe expired round states with Postgres advisory locks. It is optional by default and is enforced only when `REQUIRE_WORKER=true`.
 - When `DATABASE_URL` is configured, Telegram sessions are resolved from hashed Postgres sessions after cold starts, player wallet/onboarding state is hydrated from Postgres, and internal packet claims use a row-locked persistent packet record (`006-persistent-internal-packets.sql`) instead of process memory.
 - Persisted round transitions now use an expected-state conditional update in Postgres; stale concurrent actions fail with `409 ROUND_STATE_CONFLICT` instead of overwriting the newer round state. `pnpm telegram:verify` checks Bot identity, webhook, Menu Button and commands without printing the Bot token.
@@ -56,18 +57,18 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 
 ### Latest goal-turn verification (2026-08-21)
 
-- `pnpm test`: 10 files, 50 tests passed.
+- `pnpm test`: 10 files, 51 tests passed.
 - `pnpm typecheck`: passed.
 - `pnpm build`: Mini App, Admin, API, Worker and Bot passed.
 - `pnpm vercel:build`: passed; the bundled API emits only the existing non-blocking CJS `import.meta` warnings.
 - `pnpm test:e2e`: 13 passed, 5 skipped by the existing duplicate visual-project policy.
 - Public read-only smoke on `https://project-12-demo-staging-public.vercel.app`: homepage, health, auth, verification submit/status, hall, announcements, chat rooms, chat messages, wallet, leaderboard, daily rewards and chat read all returned 200.
 - Public health summary: `mode=demo`, `realMoneyDisabled=true`; authentication mode is `mock` and the smoke used the deterministic Demo preview account only.
-- Latest production deployment: `dpl_21J4Yi6chy9Lsxj7q2MJ411DPCLB`, alias `https://project-12-demo-staging-public.vercel.app`, Vercel state `READY`.
+- Latest production deployment: `dpl_8fZ8CeRPuvTmFiL1jauufAm2R4d7`, alias `https://project-12-demo-staging-public.vercel.app`, Vercel state `READY`; health confirms `mode=demo`, `bot=blocked`, `database=disabled`, and `realMoneyDisabled=true`.
 
 | Check | Result |
 |---|---|
-| `pnpm test` | 10 files, 49 passed |
+| `pnpm test` | 10 files, 51 passed |
 | `pnpm build` | Mini App, Admin, API, Worker and Bot passed after locale/chat changes |
 | `pnpm typecheck` / `pnpm lint` | passed; lint is intentionally the strict TypeScript gate in this small repo |
 | `pnpm test:e2e` | 13 passed: six responsive demo flows, six Telegram-runtime guard flows and one visual baseline; 5 duplicate visual projects skipped |
@@ -79,10 +80,10 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 | Visual QA | 19 named screenshots captured at 390×844, including banker bidding, plus six responsive E2E viewports and a 1440×900 Admin capture |
 | React Doctor | design scan: no issues found |
 | Runtime smoke | Demo API auth → device → referral → runtime scrypt PIN → bet → claim → settlement passed; public Vercel `/api/health` and `/api/health/live` return 200 after latest production deploy |
-| Demo KYC access smoke | Public staging auth returned `APPROVED`, `canUseChat=true`, `canUseWallet=true`; `/api/chat/room` and `/api/wallet` returned 200 after `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U` |
+| Demo KYC access smoke | Public staging auth returned `APPROVED`, `canUseChat=true`, `canUseWallet=true`; `/api/chat/room` and `/api/wallet` returned 200 after the current production deployment |
 
 ## External blocker: Telegram-connected staging
 
-The public Mini App/API is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret and a managed Supabase/Postgres connection; the current health response reports `bot: blocked`, `database: disabled`, and `mode: demo`. The supplied Supabase dashboard link is not an API credential and was not written to. The target `@onetwogaming_bot` is an external bot; it cannot be rewired to this project without the owner's BotFather token. The current workspace branch is `goal/telegram-internal-chat-game`; the locale/chat and banker-flow changes are committed as `d033b3e`, pushed, and deployed to the fresh Preview above. This does not change the preserved public staging alias.
+The public Mini App/API is reachable, but the complete Telegram-in-app path cannot be truthfully claimed yet. The deployment owner still needs to authorize the Bot token/webhook secret and a managed Supabase/Postgres connection; the current health response reports `bot: blocked`, `database: disabled`, and `mode: demo`. The supplied Supabase dashboard link is not an API credential and was not written to. The target `@onetwogaming_bot` is an external bot; it cannot be rewired to this project without the owner's BotFather token. The current workspace branch is `goal/telegram-internal-chat-game`; the typed chat-only enforcement is committed as `4da4cab` and pushed. This does not change the preserved public staging alias.
 
 Until that bundle exists, keep `REAL_MONEY_ENABLED=false`, `TOP_UP_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, `CASH_REWARD_ENABLED=false`, `PACKET_PROVIDER=demo` and `TELEGRAM_MOCK_ENABLED=true`.
