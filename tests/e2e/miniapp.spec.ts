@@ -18,6 +18,8 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   await expect(page.locator(".topbar-title h1")).toContainText("十二牛牛游戏群");
   await expect(page.locator(".chat-room-head p")).toHaveText("平台通知、抢庄、下注和红包领取都会在这里留下记录。");
   await expect(page.getByRole("textbox", { name: "我的聊天" })).toBeVisible();
+  await expect(page.locator(".chat-command-row")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "100", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "返回" }).click();
   await page.getByRole("button", { name: "钱包", exact: true }).click();
   await expect(page.getByRole("heading", { name: "我的钱包" })).toBeVisible();
