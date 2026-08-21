@@ -40,6 +40,7 @@ Current implementation gap for this goal:
 - Locale preference is validated server-side, persisted for Telegram users, and used as the payload locale for verification approval notifications.
 - The public Vercel deployment exposes the mobile-first Mini App and bundled API at `https://project-12-demo-staging-public.vercel.app`; the latest production deployment is `dpl_FmZc5M4ffxuFHKz62D69wHaBGeWt`, and direct `/api/health` plus `/` checks return 200. The current public runtime is explicitly Demo mode with real-money paths disabled.
 - Fresh branch Preview after the banker-flow fix: `https://project-12-demo-staging-public-97e4h71se-tomupros-projects.vercel.app` (`dpl_37zjdKkS7LKQahfQu2wxJse4GHvG`). Anonymous `/` and `/api/health` both return 200; health reports `mode=demo`, `realMoneyDisabled=true`, `bot=blocked`, `database=disabled`.
+- Latest deployment after the Demo KYC persistence fix: production `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U`, aliased to `https://project-12-demo-staging-public.vercel.app`. In stateless Demo mode, the default feature-preview account `demo-player-01` deterministically reports `APPROVED` so a cold Vercel instance does not return the user to the KYC modal; real persisted KYC is unchanged.
 - Vercel's webhook directly handles the Bot → Mini App reply path with retry-safe update storage; the long-running Worker claims the outbox, writes heartbeats and advances safe expired round states with Postgres advisory locks. It is optional by default and is enforced only when `REQUIRE_WORKER=true`.
 - When `DATABASE_URL` is configured, Telegram sessions are resolved from hashed Postgres sessions after cold starts, player wallet/onboarding state is hydrated from Postgres, and internal packet claims use a row-locked persistent packet record (`006-persistent-internal-packets.sql`) instead of process memory.
 - Persisted round transitions now use an expected-state conditional update in Postgres; stale concurrent actions fail with `409 ROUND_STATE_CONFLICT` instead of overwriting the newer round state. `pnpm telegram:verify` checks Bot identity, webhook, Menu Button and commands without printing the Bot token.
@@ -67,6 +68,7 @@ The runnable workspace uses the existing Vite + React + handwritten Node/SQL she
 | Visual QA | 19 named screenshots captured at 390×844, including banker bidding, plus six responsive E2E viewports and a 1440×900 Admin capture |
 | React Doctor | design scan: no issues found |
 | Runtime smoke | Demo API auth → device → referral → runtime scrypt PIN → bet → claim → settlement passed; public Vercel `/api/health` and `/api/health/live` return 200 after latest production deploy |
+| Demo KYC access smoke | Public staging auth returned `APPROVED`, `canUseChat=true`, `canUseWallet=true`; `/api/chat/room` and `/api/wallet` returned 200 after `dpl_2B8AyAuMR771TxkAaBJtcCRD3u3U` |
 
 ## External blocker: Telegram-connected staging
 
