@@ -4,10 +4,30 @@ test("captures the required onboarding, chat, wallet and social visual states", 
   test.setTimeout(120_000);
   test.skip(testInfo.project.name !== "mobile-390x844", "Keep one stable baseline set; responsive coverage remains in miniapp.spec.ts");
   const shot = async (name: string) => page.screenshot({ path: `docs/benchmark/screenshots/${name}.png`, fullPage: true });
+  await page.addInitScript(() => {
+    localStorage.removeItem("project12_onboarded");
+    localStorage.removeItem("project12_device_public_key");
+  });
+  await page.route("**/api/auth/telegram", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "visual-qa-session", user: { id: "visual-qa-player", username: "visualqa" } })
+    });
+  });
+  await page.route("**/api/onboarding/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+  await page.route("**/api/verification/status", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "APPROVED" }) });
+  });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "绑定安全设备" })).toBeVisible();
   await shot("visual-qa-01-onboarding-device");
-  await page.getByRole("button", { name: /绑定本设备/ }).click();
+  const bindDeviceButton = page.getByRole("button", { name: /绑定本设备|检查 Telegram 环境/ });
+  await expect(bindDeviceButton).toBeVisible();
+  await expect(bindDeviceButton).toBeEnabled();
+  await bindDeviceButton.click();
   await shot("visual-qa-02-onboarding-referrer");
   await page.getByLabel("邀请人 UID / 邀请码").fill("DEMO-INVITE");
   await page.getByRole("button", { name: /继续确认/ }).click();
