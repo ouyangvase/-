@@ -45,7 +45,7 @@ type OutboxRow = { id: string; event_type: string; payload: Record<string, unkno
 
 function isLaunchCommand(update: TelegramUpdate): boolean {
   const command = update.message?.text?.trim().split(/\s+/, 1)[0]?.split("@", 1)[0];
-  return command === "/start" || command === "/play";
+  return command === "/start" || command === "/open" || command === "/play";
 }
 
 async function prepareLaunchToken(updateId: number, update: TelegramUpdate): Promise<string | undefined> {

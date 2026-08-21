@@ -30,13 +30,12 @@ const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAM
 
 export const botCommands: BotCommand[] = [
   { command: "start", description: "打开 12牛牛" },
-  { command: "play", description: "进入游戏大厅" },
-  { command: "wallet", description: "查看模拟积分" },
-  { command: "history", description: "查看回合记录" },
-  { command: "missions", description: "查看任务奖励" },
-  { command: "referral", description: "查看邀请关系" },
-  { command: "rules", description: "查看 12牛牛规则" },
-  { command: "support", description: "联系支持" }
+  { command: "open", description: "进入游戏大厅" },
+  { command: "wallet", description: "查看钱包" },
+  { command: "chat", description: "打开游戏聊天室" },
+  { command: "verification", description: "查看实名认证" },
+  { command: "support", description: "联系支持" },
+  { command: "language", description: "选择语言" }
 ];
 
 export function buildStartDeepLink(referralCode?: string): string {
@@ -115,14 +114,17 @@ export function buildPrivatePacketNotification(chatId: string | number, roundId:
 
 export function buildCommandMessage(chatId: string | number, command: string, startParam = "", launchToken?: string, locale = defaultLocale()): BotMessage | NotificationPayload {
   const t = createTranslator(locale);
-  if (command === "/start" || command === "/play") return buildWelcomeMessage(chatId, startParam, launchToken, locale);
+  if (command === "/start" || command === "/open" || command === "/play") return buildWelcomeMessage(chatId, startParam, launchToken, locale);
   const labels: Record<string, string> = {
     "/wallet": t("bot.wallet"),
+    "/chat": t("bot.chat"),
+    "/verification": t("bot.verification"),
+    "/language": t("bot.language"),
+    "/support": t("bot.support"),
     "/history": t("bot.history"),
     "/missions": t("bot.missions"),
     "/referral": t("bot.referral"),
-    "/rules": t("bot.rules"),
-    "/support": t("bot.support")
+    "/rules": t("bot.rules")
   };
   return buildRoundNotification(chatId, "BOT", labels[command] ?? t("bot.fallback"), locale);
 }

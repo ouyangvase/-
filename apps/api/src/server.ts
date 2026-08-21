@@ -468,8 +468,8 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
        if (!identity) return undefined;
        return writeIdempotent(request, response, async (key) => {
          const data = await body(request);
-         const text = typeof data.text === "string" ? data.text.trim().slice(0, 48) : typeof data.body === "string" ? data.body.trim().slice(0, 48) : "";
-         if (!text) throw new Error("请输入下注金额或游戏指令");
+          const text = typeof data.text === "string" ? data.text.trim().slice(0, 240) : typeof data.body === "string" ? data.body.trim().slice(0, 240) : "";
+         if (!text) throw new Error("请输入聊天消息或游戏指令");
          const numeric = /^(?:sh\s*)?(\d+)$/.exec(text.toLowerCase());
           const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价)$/i.test(text);
           const closeCommand = /^(?:stop|close|停止下注|结束下注)$/i.test(text);
@@ -536,7 +536,12 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
              }
            };
          }
-        throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
+          const looksLikeGameInput = numeric || closeBankerCommand || closeCommand || restartCommand || confirmCommand || claimCommand || /^(?:help|帮助|玩法)$/i.test(text);
+          if (!looksLikeGameInput && !text.startsWith("/")) {
+            addRoomMessage("USER", text, { messageType: "CHAT" }, identity.userId);
+            return { command: "MESSAGE", result: { state: state.round.state, message: text } };
+          }
+         throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
        });
      }
      const chatReadAlias = /^\/api\/chat\/rooms\/([^/]+)\/read$/.exec(originalPath);

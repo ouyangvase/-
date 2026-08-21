@@ -13,13 +13,12 @@ if (!token || !miniAppUrl || !webhookUrl || !webhookSecret) {
 
 const commands = [
   ["start", "打开 12牛牛"],
-  ["play", "进入游戏大厅"],
-  ["wallet", "查看内部积分"],
-  ["history", "查看回合记录"],
-  ["missions", "查看任务奖励"],
-  ["referral", "查看邀请关系"],
-  ["rules", "查看 12牛牛规则"],
-  ["support", "联系支持"]
+  ["open", "进入游戏大厅"],
+  ["wallet", "查看钱包"],
+  ["chat", "打开游戏聊天室"],
+  ["verification", "查看实名认证"],
+  ["support", "联系支持"],
+  ["language", "选择语言"]
 ].map(([command, description]) => ({ command, description }));
 
 async function telegram(method, payload) {

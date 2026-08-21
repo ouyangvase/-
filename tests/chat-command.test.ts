@@ -41,6 +41,10 @@ describe("internal chat game commands", () => {
     await approve("chat-command-spectator", spectatorSession, "chat-command-spectator");
     const command = (session: Record<string, string>, text: string, key: string) => request("/api/chat/room/command", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
 
+    const chatMessage = await command(spectatorSession, "大家好，等这一局开始。", "chat-command-message");
+    expect(chatMessage.status).toBe(200);
+    expect((await chatMessage.json()).result.command).toBe("MESSAGE");
+
     const bid = await command(bankerSession, "600", "chat-command-bid");
     expect(bid.status).toBe(200);
     expect((await bid.json()).result.result.state).toBe("BANKER_BIDDING");
@@ -71,6 +75,7 @@ describe("internal chat game commands", () => {
     const room = await request("/api/chat/room", { headers: bankerSession });
     const roomBody = await room.json() as { messages: Array<{ body: string }> };
     expect(roomBody.messages.some((message) => message.body === "sh 10")).toBe(true);
+    expect(roomBody.messages.some((message) => message.body === "大家好，等这一局开始。" && message.type === "USER")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "18")).toBe(false);
     expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
     const bankerRoom = await request("/api/chat/room", { headers: bettorSession });

@@ -8,7 +8,7 @@ const required = [
   "DATABASE_URL", "DIRECT_URL", "TELEGRAM_WEBHOOK_SECRET", "SESSION_SECRET",
   "TELEGRAM_WEBHOOK_URL", "TELEGRAM_MINI_APP_URL"
 ];
-const expectedCommands = ["start", "play", "wallet", "history", "missions", "referral", "rules", "support"];
+const expectedCommands = ["start", "open", "wallet", "chat", "verification", "support", "language"];
 
 function normalizedUrl(value: string | undefined): string { return (value ?? "").replace(/\/$/, ""); }
 
