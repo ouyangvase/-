@@ -171,11 +171,11 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   roundEvents.unshift(event);
   queueOutbox("ROUND_STATE_CHANGED", { ...event });
   audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload });
-  if (to === "BETTING" && typeof payload.amount === "number") addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
-  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家发送「确认发包」开始发红包；旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
-  if (to === "PACKET_SENT" && payload.bettingClosed === true) addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
-  if (to === "EVALUATING" && typeof payload.claimedAt === "string") addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
-  if (to === "ROUND_COMPLETE") addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入 Demo 账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
+  if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
+  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家发送「确认发包」开始发红包；旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
+  if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
+  if (to === "EVALUATING" && typeof payload.claimedAt === "string") await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
+  if (to === "ROUND_COMPLETE") await addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入 Demo 账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
   broadcastRoundEvent(event);
   return event;
 }
@@ -224,12 +224,12 @@ function verificationInput(data: Record<string, unknown>): { legalName: string; 
   return { legalName, tngAccountNo };
 }
 function messageActor(userId: string): string { return userId === state.user.id ? "你" : `玩家-${userId.slice(-4)}`; }
-function addRoomMessage(type: string, message: string, payload: Record<string, unknown> = {}, userId?: string, visibility: "PUBLIC_ROOM" | "PARTICIPANTS_ONLY" | "TARGET_USER" | "ADMIN_ONLY" = "PUBLIC_ROOM", targetUserId?: string) {
+async function addRoomMessage(type: string, message: string, payload: Record<string, unknown> = {}, userId?: string, visibility: "PUBLIC_ROOM" | "PARTICIPANTS_ONLY" | "TARGET_USER" | "ADMIN_ONLY" = "PUBLIC_ROOM", targetUserId?: string): Promise<void> {
   const templateKey = typeof payload.templateKey === "string" ? payload.templateKey : undefined;
   const entry: RoomMessage = { id: `MSG-${String(roomMessages.length + 1).padStart(4, "0")}`, type, body: message, createdAt: now(), payload, ...(templateKey ? { templateKey } : {}), visibility, ...(userId ? { actor: messageActor(userId) } : {}), ...(targetUserId ? { targetUserId } : {}) };
+  await persistence.persistRoomMessage({ type, body: message, payload, templateKey, userId, visibility, targetUserId });
   roomMessages.push(entry);
   broadcastRoomEvent(entry);
-  persistAsync(() => persistence.persistRoomMessage({ type, body: message, payload, templateKey, userId, visibility, targetUserId }));
   queueOutbox("INTERNAL_CHAT_MESSAGE", { messageId: entry.id, roundId: state.round.id, type, body: message, payload, visibility, targetUserId });
 }
 async function executeBid(identity: { userId: string }, key: string, amount: number) {
@@ -291,7 +291,7 @@ async function executeBet(identity: { userId: string }, key: string, amount: num
   bettors.set(identity.userId, amount);
   roundBettors.set(state.round.id, bettors);
   syncUserBalances();
-  if (source === "LEGACY") addRoomMessage("BET", `${messageActor(identity.userId)} 下单 ${amount} PT，等待停止下注。`, { amount, packetMode: "PENDING" }, identity.userId);
+  if (source === "LEGACY") await addRoomMessage("BET", `${messageActor(identity.userId)} 下单 ${amount} PT，等待停止下注。`, { amount, packetMode: "PENDING" }, identity.userId);
   state.ledger.unshift({ id: journal.id, reason: journal.reason, change: -amount, balanceAfter: state.user.available, createdAt: "Just now" });
   audit(identity.userId, "BET_LOCKED", "JOURNAL", journal.id, undefined, { journal, bettingClosed: false });
   return { state: state.round.state, locked: state.user.locked, journal, bettingClosed: false, packet: null };
@@ -323,7 +323,7 @@ async function executeConfirmPacket(identity: { userId: string }, key: string) {
   await transition("PACKET_SENT", identity.userId, { amount: packet.totalAmount, packetId: packet.id, maxClaims: packet.maxClaims, bettorCount: bettorRows.length, bettingClosed: true, acceptedAt: now(), packetMode: "INTERNAL", idempotencyKey: key });
   await transition("CLAIMING", identity.userId, { packetId: packet.id, maxClaims: packet.maxClaims });
   for (const bettor of bettorRows) {
-    addRoomMessage("PACKET_CARD", "平台内部红包已发放给本局参与者。", { packetId: packet.id, roundId: state.round.id, amount: packet.totalAmount, maxClaims: packet.maxClaims }, undefined, "TARGET_USER", bettor.userId);
+    await addRoomMessage("PACKET_CARD", "平台内部红包已发放给本局参与者。", { packetId: packet.id, roundId: state.round.id, amount: packet.totalAmount, maxClaims: packet.maxClaims }, undefined, "TARGET_USER", bettor.userId);
     queueOutbox("ROUND_PACKET_AVAILABLE", { notificationId: `packet:${state.round.id}:${packet.id}:${bettor.userId}`, roundId: state.round.id, packetId: packet.id, amount: packet.totalAmount, maxClaims: packet.maxClaims, recipients: [bettor.userId] });
   }
   state.round.endsAt = "00:45";
@@ -341,10 +341,10 @@ async function publishRoundResults(roundId: string, packetId: string, bettorRows
   });
   roundResults.set(roundId, rows);
   const summary = rows.map((row) => `${messageActor(row.userId)} · ${row.hand.type} ${row.hand.points}点 · ${row.outcome} · ${row.betAmount} PT`).join("\n");
-  addRoomMessage("RESULTS", `📊 本局成绩已公布\n庄家：${messageActor(state.round.banker)} · ${bankerHand.type}\n${summary}`, { templateKey: "game.results.published", roundId, packetId, results: rows }, undefined, "PUBLIC_ROOM");
+  await addRoomMessage("RESULTS", `📊 本局成绩已公布\n庄家：${messageActor(state.round.banker)} · ${bankerHand.type}\n${summary}`, { templateKey: "game.results.published", roundId, packetId, results: rows }, undefined, "PUBLIC_ROOM");
   return rows;
 }
-function startNextRound(actor: string) {
+async function startNextRound(actor: string) {
   if (persistence.configured && appMode !== "demo") throw new Error("ROUND_CONTINUATION_REQUIRES_WORKER");
   const previousRoundId = state.round.id;
   const nextNumber = Number(previousRoundId.replace(/\D/g, "")) + 1;
@@ -355,7 +355,7 @@ function startNextRound(actor: string) {
   roundBettors.delete(previousRoundId);
   packetIds.delete(previousRoundId);
   roundResults.delete(previousRoundId);
-  addRoomMessage("ROUND", `🟢 新一局 ${nextRoundId} 已开始，等待玩家抢庄。`, { templateKey: "game.round.started", roundId: nextRoundId, previousRoundId });
+  await addRoomMessage("ROUND", `🟢 新一局 ${nextRoundId} 已开始，等待玩家抢庄。`, { templateKey: "game.round.started", roundId: nextRoundId, previousRoundId });
   queueOutbox("ROUND_STARTED", { roundId: nextRoundId, previousRoundId, actor });
   audit(actor, "ROUND_CONTINUED", "ROUND", nextRoundId, { previousRoundId }, { state: "BANKER_BIDDING" });
   return { roundId: nextRoundId, state: state.round.state, banker: state.round.banker };
@@ -471,7 +471,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "GET" && url.pathname === "/api/me") return activeSession ? json(response, 200, { ...state.user, id: activeSession.userId }) : json(response, 401, { error: "Unauthorized" });
     if (request.method === "GET" && url.pathname === "/api/onboarding/status") { const identity = requirePlayer(request, response); return identity ? json(response, 200, onboardingState(identity.userId)) : undefined; }
     if (request.method === "GET" && url.pathname === "/api/verification/status") { const identity = requirePlayer(request, response); if (!identity) return undefined; const verification = await verificationState(identity.userId); return json(response, 200, { ...verification, canUseChat: verification.status === "APPROVED", canUseWallet: verification.status === "APPROVED" }); }
-    if (request.method === "POST" && url.pathname === "/api/verification/submit") { const identity = requirePlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, async (key) => { const data = verificationInput(await body(request)); const current = await verificationState(identity.userId); if (current.status === "APPROVED") { if (appMode === "demo" && identity.userId === demoVerifiedUserId) return current; throw new Error("实名认证已经通过"); } if (current.status === "SUSPENDED") throw new Error("当前账户暂时受限，无法重新提交实名认证"); const next: VerificationSnapshot = persistence.configured ? await persistence.persistVerification(identity.userId, data.legalName, data.tngAccountNo) : appMode === "demo" && identity.userId === demoVerifiedUserId ? { status: "APPROVED", submittedAt: now(), tngAccountLast4: maskTngAccount(data.tngAccountNo) } : { status: "PENDING", submittedAt: now(), tngAccountLast4: maskTngAccount(data.tngAccountNo) }; verificationStates.set(identity.userId, next); audit(identity.userId, "IDENTITY_VERIFICATION_SUBMITTED", "IDENTITY_VERIFICATION", identity.userId, undefined, { status: next.status, tngAccountLast4: next.tngAccountLast4, idempotencyKey: key }); addRoomMessage("SYSTEM", next.status === "APPROVED" ? "平台通知：Demo 预览实名已通过，可进入游戏聊天室。" : "平台通知：新的玩家已提交实名认证，审核通过后可进入游戏聊天室。", { status: next.status }); return next; }); }
+    if (request.method === "POST" && url.pathname === "/api/verification/submit") { const identity = requirePlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, async (key) => { const data = verificationInput(await body(request)); const current = await verificationState(identity.userId); if (current.status === "APPROVED") { if (appMode === "demo" && identity.userId === demoVerifiedUserId) return current; throw new Error("实名认证已经通过"); } if (current.status === "SUSPENDED") throw new Error("当前账户暂时受限，无法重新提交实名认证"); const next: VerificationSnapshot = persistence.configured ? await persistence.persistVerification(identity.userId, data.legalName, data.tngAccountNo) : appMode === "demo" && identity.userId === demoVerifiedUserId ? { status: "APPROVED", submittedAt: now(), tngAccountLast4: maskTngAccount(data.tngAccountNo) } : { status: "PENDING", submittedAt: now(), tngAccountLast4: maskTngAccount(data.tngAccountNo) }; verificationStates.set(identity.userId, next); audit(identity.userId, "IDENTITY_VERIFICATION_SUBMITTED", "IDENTITY_VERIFICATION", identity.userId, undefined, { status: next.status, tngAccountLast4: next.tngAccountLast4, idempotencyKey: key }); await addRoomMessage("SYSTEM", next.status === "APPROVED" ? "平台通知：Demo 预览实名已通过，可进入游戏聊天室。" : "平台通知：新的玩家已提交实名认证，审核通过后可进入游戏聊天室。", { status: next.status }); return next; }); }
     if (request.method === "GET" && url.pathname === "/api/admin/verifications") { if (!requireAdmin(request)) return json(response, 403, { error: "Admin authorization required" }); const requestedStatus = url.searchParams.get("status") as VerificationSnapshot["status"] | null; const allowed = new Set<VerificationSnapshot["status"]>(["PENDING", "APPROVED", "REJECTED", "NEEDS_MORE_INFO", "SUSPENDED"]); const status = requestedStatus && allowed.has(requestedStatus) ? requestedStatus : undefined; if (persistence.configured) return json(response, 200, await persistence.listVerificationCases(status)); return json(response, 200, [...verificationStates.entries()].filter(([, item]) => !status || item.status === status).map(([telegramUserId, item]) => ({ telegramUserId, ...item, tngAccountMasked: item.tngAccountLast4 }))); }
     if (request.method === "POST" && url.pathname.startsWith("/api/admin/verification/") && url.pathname.endsWith("/review")) { if (!requireAdmin(request)) return json(response, 403, { error: "Admin approval required" }); const telegramUserId = decodeURIComponent(url.pathname.split("/")[4] ?? ""); return writeIdempotent(request, response, async (key) => { const data = await body(request); const allowed = new Set<VerificationSnapshot["status"]>(["APPROVED", "REJECTED", "NEEDS_MORE_INFO", "SUSPENDED"]); const status = forcedVerificationStatus ?? (typeof data.status === "string" && allowed.has(data.status as VerificationSnapshot["status"]) ? data.status as Exclude<VerificationSnapshot["status"], "NOT_SUBMITTED"> : undefined); if (!status) throw new Error("Invalid verification review status"); const reason = typeof data.reason === "string" ? data.reason.slice(0, 200) : undefined; const previous = await verificationState(telegramUserId); const next: VerificationSnapshot = persistence.configured ? (await persistence.reviewVerificationCase(telegramUserId, status, "demo-admin", reason) ?? { status: "NOT_SUBMITTED" }) : { status, ...(reason ? { rejectionReason: reason } : {}) }; verificationStates.set(telegramUserId, next); audit("demo-admin", "IDENTITY_VERIFICATION_REVIEWED", "IDENTITY_VERIFICATION", telegramUserId, { status: previous.status }, { status: next.status, reason, idempotencyKey: key }); if (previous.status !== "APPROVED" && next.status === "APPROVED") queueOutbox("IDENTITY_VERIFICATION_APPROVED", { telegramUserId, locale: preferredLocales.get(telegramUserId) ?? "zh-CN", notificationId: `verification:${telegramUserId}:${next.submittedAt ?? now()}` }); return next; }); }
     if (request.method === "POST" && url.pathname === "/api/onboarding/device-bind") { const identity = requirePlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, async (key) => { const data = await body(request); const publicKey = typeof data.publicKey === "string" ? data.publicKey.trim() : ""; if (publicKey.length < 32) throw new Error("Device public key is required"); const existing = deviceBindings.get(publicKey); if (existing && existing.userId !== identity.userId) throw new Error("Device is already bound to another account"); const current = onboardingState(identity.userId); if (!existing) deviceBindings.set(publicKey, { userId: identity.userId, publicKey, boundAt: now() }); await persistence.persistDevice(identity.userId, publicKey); current.deviceBound = true; audit(identity.userId, "DEVICE_BOUND", "DEVICE", createHash("sha256").update(publicKey).digest("hex").slice(0, 16), undefined, { idempotencyKey: key, keyType: "public-key" }); return { status: "BOUND", deviceBound: true, devicePublicKey: publicKey }; }); }
@@ -500,52 +500,52 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
           if ((text === "1" || text === "0") && state.round.state === "ROUND_COMPLETE") {
             if (text === "1") {
               if (state.round.banker !== identity.userId) throw new Error("只有本局庄家可以续庄");
-              addRoomMessage("USER", text, { command: "CONTINUE", value: 1 }, identity.userId);
-              return { command: "CONTINUE", result: startNextRound(identity.userId) };
+              await addRoomMessage("USER", text, { command: "CONTINUE", value: 1 }, identity.userId);
+              return { command: "CONTINUE", result: await startNextRound(identity.userId) };
             }
-            addRoomMessage("USER", text, { command: "END_TABLE", value: 0 }, identity.userId);
-            addRoomMessage("ROUND", "本桌已结束，感谢参与。", { templateKey: "game.table.ended", roundId: state.round.id });
+            await addRoomMessage("USER", text, { command: "END_TABLE", value: 0 }, identity.userId);
+            await addRoomMessage("ROUND", "本桌已结束，感谢参与。", { templateKey: "game.table.ended", roundId: state.round.id });
             return { command: "END_TABLE", result: { state: state.round.state, ended: true } };
           }
           if (bankerNumeric && state.round.state === "BANKER_BIDDING") {
             const amount = Number(bankerNumeric[1]);
            const result = await executeBid(identity, key, amount);
-           addRoomMessage("USER", text, { command: "BID", amount }, identity.userId);
+           await addRoomMessage("USER", text, { command: "BID", amount }, identity.userId);
            return { command: "BID", result };
          }
          if (closeBankerCommand && state.round.state === "BANKER_BIDDING") {
            const result = await executeCloseBankerBidding(identity, key);
-           addRoomMessage("USER", text, { command: "CLOSE_BANKER_BIDDING" }, identity.userId);
+           await addRoomMessage("USER", text, { command: "CLOSE_BANKER_BIDDING" }, identity.userId);
            return { command: "CLOSE_BANKER_BIDDING", result };
          }
          if (state.round.state === "BETTING") {
            const betCommand = parseChatBetCommand(text);
            if (betCommand) {
              const result = await executeBet(identity, key, betCommand.amount, "CHAT");
-             addRoomMessage("USER", text, { command: "BET", amount: betCommand.amount, mode: betCommand.mode }, identity.userId);
+             await addRoomMessage("USER", text, { command: "BET", amount: betCommand.amount, mode: betCommand.mode }, identity.userId);
              return { command: "BET", result };
            }
          }
          if (closeCommand && state.round.state === "BETTING") {
            const result = await executeCloseBetting(identity, key);
-           addRoomMessage("USER", text, { command: "CLOSE_BETTING" }, identity.userId);
+           await addRoomMessage("USER", text, { command: "CLOSE_BETTING" }, identity.userId);
            return { command: "CLOSE_BETTING", result };
          }
          if (confirmCommand && state.round.state === "WAITING_BANKER_CONFIRM") {
            const result = await executeConfirmPacket(identity, key);
-           addRoomMessage("USER", text, { command: "CONFIRM_PACKET" }, identity.userId);
+           await addRoomMessage("USER", text, { command: "CONFIRM_PACKET" }, identity.userId);
            return { command: "CONFIRM_PACKET", result };
          }
          if (claimCommand && state.round.state === "CLAIMING") {
            const result = await executePacketClaim(identity, key);
-           addRoomMessage("USER", text, { command: "CLAIM_PACKET" }, identity.userId);
+           await addRoomMessage("USER", text, { command: "CLAIM_PACKET" }, identity.userId);
            return { command: "CLAIM_PACKET", result };
          }
          if (restartCommand && state.round.state === "WAITING_BANKER_CONFIRM") {
            if (state.round.banker !== identity.userId) throw new Error("只有当前庄家可以重推本局");
            await transition("ROUND_CANCELLED", identity.userId, { reason: "banker requested restart", idempotencyKey: key });
-           addRoomMessage("USER", text, { command: "RESTART_ROUND" }, identity.userId);
-           addRoomMessage("ROUND", "本局已按庄家请求取消，等待下一局重新抢庄。", { templateKey: "game.round.cancelled", roundId: state.round.id });
+           await addRoomMessage("USER", text, { command: "RESTART_ROUND" }, identity.userId);
+           await addRoomMessage("ROUND", "本局已按庄家请求取消，等待下一局重新抢庄。", { templateKey: "game.round.cancelled", roundId: state.round.id });
            return { command: "RESTART_ROUND", result: { state: state.round.state, cancelled: true } };
          }
          if (/^(?:help|帮助|玩法)$/i.test(text)) {
@@ -559,7 +559,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
          }
           const looksLikeGameInput = numeric || bankerNumeric || closeBankerCommand || closeCommand || restartCommand || confirmCommand || claimCommand || /^(?:help|帮助|玩法)$/i.test(text);
           if (!looksLikeGameInput && !text.startsWith("/")) {
-            addRoomMessage("USER", text, { messageType: "CHAT" }, identity.userId);
+            await addRoomMessage("USER", text, { messageType: "CHAT" }, identity.userId);
             return { command: "MESSAGE", result: { state: state.round.state, message: text } };
           }
          throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
