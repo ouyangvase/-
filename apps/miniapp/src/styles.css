@@ -155,8 +155,7 @@ body { overflow-x: hidden; background: #000; }
 .chat-input-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .chat-input-row .mechanism-input { min-height: 46px; border-radius: 999px; }
 .chat-send { min-height: 46px; padding: 0 16px; }
-.chat-packet-card { display: block; width: 100%; border: 0; text-align: left; cursor: pointer; }
-.chat-packet-card:hover { filter: brightness(1.08); }
+.chat-packet-card { display: block; width: 100%; border: 0; text-align: left; }
 .chat-packet-open { display: block; margin-top: 10px; color: #ffe2ac; font-size: 11px; font-weight: 800; }
 .chat-history-button { width: 100%; min-height: 38px; border: 1px solid var(--steel-dark); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.04); font-size: 11px; }
 .chat-history-button:disabled { opacity: .55; }

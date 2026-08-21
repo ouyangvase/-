@@ -42,6 +42,7 @@ const englishMessages = {
   "chat.noRooms": "No rooms yet",
   "chat.pinned": "Pinned message",
   "chat.participantOnly": "Only round participants can open this packet",
+  "chat.claimInstruction": "Type “claim” to open",
   "chat.spectator": "You are watching this round",
   "profile.title": "My Account",
   "profile.daysJoined": "Days joined",
@@ -280,6 +281,8 @@ const additionalLocaleMessages: Partial<Record<Locale, Partial<Record<Translatio
 
 const bankerConfirmLabels: Record<Locale, string> = { "zh-CN": "确认发红包", "zh-TW": "確認發紅包", en: "Confirm packet", ms: "Sahkan paket", th: "ยืนยันการส่งซอง", vi: "Xác nhận phát bao", id: "Konfirmasi paket", ta: "பாக்கெட்டை உறுதிப்படுத்து", my: "packet အတည်ပြု", km: "បញ្ជាក់កញ្ចប់", hi: "पैकेट की पुष्टि करें", ar: "تأكيد الحزمة", ja: "パケットを確定", ko: "패킷 확정", fil: "Kumpirmahin ang packet" };
 for (const locale of supportedLocales) (supplementalMessages[locale] ??= {})["game.banker.confirmPacket"] = bankerConfirmLabels[locale];
+const claimInstructionLabels: Record<Locale, string> = { "zh-CN": "输入“抢红包”领取", "zh-TW": "輸入「搶紅包」領取", en: "Type “claim” to open", ms: "Taip “claim” untuk membuka", th: "พิมพ์ “claim” เพื่อเปิดซอง", vi: "Nhập “claim” để mở bao", id: "Ketik “claim” untuk membuka", ta: "“claim” என்று தட்டச்சு செய்து திறக்கவும்", my: "ဖွင့်ရန် “claim” ကို ရိုက်ပါ", km: "វាយ “claim” ដើម្បីបើក", hi: "खोलने के लिए “claim” लिखें", ar: "اكتب “claim” لفتحها", ja: "「claim」と入力して開く", ko: "열려면 “claim” 입력", fil: "I-type ang “claim” para buksan" };
+for (const locale of supportedLocales) (supplementalMessages[locale] ??= {})["chat.claimInstruction"] = claimInstructionLabels[locale];
 const bankerCloseLabels: Record<Locale, string> = { "zh-CN": "结束抢庄", "zh-TW": "結束搶莊", en: "End banker bidding", ms: "Tamatkan bidaan banker", th: "จบการประมูลเจ้ามือ", vi: "Kết thúc đấu giá nhà cái", id: "Akhiri penawaran banker", ta: "வங்கி ஏலத்தை முடி", my: "ဘဏ်ကာလေလံပိတ်", km: "បញ្ចប់ការដេញថ្លៃធនាគារ", hi: "बैंकर बोली समाप्त करें", ar: "إنهاء مزاد المصرف", ja: "親決めを終了", ko: "뱅커 입찰 종료", fil: "Tapusin ang banker bidding" };
 for (const locale of supportedLocales) (supplementalMessages[locale] ??= {})["game.banker.close"] = bankerCloseLabels[locale];
 const packetSystemMessages: Record<Locale, Partial<Record<TranslationKey, string>>> = {

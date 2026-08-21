@@ -56,6 +56,9 @@ describe("internal chat game commands", () => {
     const bet = await command(bankerSession, "sh 10", "chat-command-bet");
     expect(bet.status).toBe(200);
     expect((await bet.json()).result.result.state).toBe("BETTING");
+    const invalidBet = await command(bettorSession, "18", "chat-command-invalid-bet");
+    expect(invalidBet.status).toBe(400);
+    expect((await invalidBet.json()).error).toContain("2–17");
     const close = await command(bettorSession, "停止下注", "chat-command-close");
     expect(close.status).toBe(200);
     expect((await close.json()).result.result.state).toBe("WAITING_BANKER_CONFIRM");
@@ -67,7 +70,8 @@ describe("internal chat game commands", () => {
     expect((await confirm.json()).result.result.state).toBe("CLAIMING");
     const room = await request("/api/chat/room", { headers: bankerSession });
     const roomBody = await room.json() as { messages: Array<{ body: string }> };
-    expect(roomBody.messages.some((message) => message.body.includes("下单 10 PT"))).toBe(true);
+    expect(roomBody.messages.some((message) => message.body === "sh 10")).toBe(true);
+    expect(roomBody.messages.some((message) => message.body === "18")).toBe(false);
     expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
     const bankerRoom = await request("/api/chat/room", { headers: bettorSession });
     const bankerRoomBody = await bankerRoom.json() as { messages: Array<{ body: string }> };
@@ -75,5 +79,8 @@ describe("internal chat game commands", () => {
     const spectatorRoom = await request("/api/chat/room", { headers: spectatorSession });
     const spectatorRoomBody = await spectatorRoom.json() as { messages: Array<{ body: string }> };
     expect(spectatorRoomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(false);
+    const claim = await command(bankerSession, "抢红包", "chat-command-claim");
+    expect(claim.status).toBe(200);
+    expect((await claim.json()).result.command).toBe("CLAIM_PACKET");
   });
 });

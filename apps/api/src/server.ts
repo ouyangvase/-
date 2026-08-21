@@ -254,10 +254,27 @@ async function executeCloseBankerBidding(identity: { userId: string }, key: stri
   audit(identity.userId, "BANKER_BIDDING_CLOSED", "ROUND", state.round.id, undefined, { banker: winner.userId, amount: winner.amount, bidCount: bids.length, idempotencyKey: key });
   return { state: state.round.state, banker: winner.userId, amount: winner.amount, currentHighest: winner.amount, biddingClosed: true, bidCount: bids.length };
 }
-async function executeBet(identity: { userId: string }, key: string, amount: number) {
+function parseChatBetCommand(text: string): { amount: number; mode: "BET" | "SHOVE" } | undefined {
+  const normal = /^(\d+)$/.exec(text);
+  if (normal) {
+    const amount = Number(normal[1]);
+    if (amount < 2 || amount > 17) throw new Error("普通下注只能发送 2–17 的整数");
+    return { amount, mode: "BET" };
+  }
+  const shove = /^sh\s*(\d+)$/i.exec(text);
+  if (shove) {
+    const amount = Number(shove[1]);
+    if (amount < 10 || amount > 177) throw new Error("梭哈下注只能发送 sh10–sh177 的整数");
+    return { amount, mode: "SHOVE" };
+  }
+  return undefined;
+}
+async function executeBet(identity: { userId: string }, key: string, amount: number, source: "CHAT" | "LEGACY" = "LEGACY") {
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("Bet amount must be a positive integer");
   if (state.round.state !== "BETTING") throw new Error("Betting is closed");
   if (state.round.banker === identity.userId) throw new Error("Bankers cannot place player bets");
+  const existingBettors = await roundBettorRows();
+  if (existingBettors.some((bettor) => bettor.userId === identity.userId)) throw new Error("每位玩家每局只能下注一次");
   const journal = createTransferJournal({ id: `J-BET-${identity.userId}`, referenceType: "BET_LOCK", referenceId: state.round.id, idempotencyKey: key, reason: "Lock demo bet", from: "USER_AVAILABLE", to: "USER_LOCKED", amount });
   Object.assign(balances, applyJournal(balances, journal));
   await persistence.persistBet(identity.userId, amount);
@@ -266,7 +283,7 @@ async function executeBet(identity: { userId: string }, key: string, amount: num
   bettors.set(identity.userId, amount);
   roundBettors.set(state.round.id, bettors);
   syncUserBalances();
-  addRoomMessage("BET", `${messageActor(identity.userId)} 下单 ${amount} PT，等待停止下注。`, { amount, packetMode: "PENDING" }, identity.userId);
+  if (source === "LEGACY") addRoomMessage("BET", `${messageActor(identity.userId)} 下单 ${amount} PT，等待停止下注。`, { amount, packetMode: "PENDING" }, identity.userId);
   state.ledger.unshift({ id: journal.id, reason: journal.reason, change: -amount, balanceAfter: state.user.available, createdAt: "Just now" });
   audit(identity.userId, "BET_LOCKED", "JOURNAL", journal.id, undefined, { journal, bettingClosed: false });
   return { state: state.round.state, locked: state.user.locked, journal, bettingClosed: false, packet: null };
@@ -357,7 +374,7 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
   state.round.endsAt = allClaimed ? "Done" : "00:45";
   const hand = classifyHand([3, 4, 2]);
   audit(identity.userId, "INTERNAL_PACKET_CLAIMED", "ROUND", state.round.id, undefined, { ...claim, allClaimed, claimedCount: claims.length });
-  return { ...claim, hand, results, allClaimed, claimedCount: claims.length, maxClaims: bettorIds.length };
+  return { ...claim, hand, results, allClaimed, claimedCount: claims.length, maxClaims: bettorIds.length, state: state.round.state };
 }
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
 async function hydrateRuntime(runtime: ApiRuntime): Promise<void> { if (!persistence.configured) return; const snapshot = await persistence.loadRoundRuntime(); if (snapshot) { runtime.state.round.state = snapshot.state; runtime.state.round.banker = snapshot.bankerUserId ?? runtime.state.round.banker; runtime.state.round.bankPool = snapshot.bankerPool; runtime.balances.BANKER_POOL = snapshot.bankerPool; } }
@@ -458,41 +475,55 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
           const closeCommand = /^(?:stop|close|停止下注|结束下注)$/i.test(text);
           const restartCommand = /^(?:\/重推|重推|restart|reopen)$/i.test(text);
           const confirmCommand = /^(?:1|confirm|确认|确认发红包|开始发红包)$/i.test(text);
+          const claimCommand = /^(?:抢红包|领红包|开红包|claim|open|open\s*packet)$/i.test(text);
           if ((text === "1" || text === "0") && state.round.state === "ROUND_COMPLETE") {
             if (text === "1") {
               if (state.round.banker !== identity.userId) throw new Error("只有本局庄家可以续庄");
-              addRoomMessage("USER", `${messageActor(identity.userId)} 续庄`, { command: "CONTINUE", value: 1 }, identity.userId);
+              addRoomMessage("USER", text, { command: "CONTINUE", value: 1 }, identity.userId);
               return { command: "CONTINUE", result: startNextRound(identity.userId) };
             }
-            addRoomMessage("USER", `${messageActor(identity.userId)} 结束本桌`, { command: "END_TABLE", value: 0 }, identity.userId);
+            addRoomMessage("USER", text, { command: "END_TABLE", value: 0 }, identity.userId);
             addRoomMessage("ROUND", "本桌已结束，感谢参与。", { templateKey: "game.table.ended", roundId: state.round.id });
             return { command: "END_TABLE", result: { state: state.round.state, ended: true } };
           }
          if (numeric && state.round.state === "BANKER_BIDDING") {
            const amount = Number(numeric[1]);
-           addRoomMessage("USER", `${messageActor(identity.userId)} ${amount}`, { command: "BID", amount }, identity.userId);
-           return { command: "BID", result: await executeBid(identity, key, amount) };
+           const result = await executeBid(identity, key, amount);
+           addRoomMessage("USER", text, { command: "BID", amount }, identity.userId);
+           return { command: "BID", result };
          }
          if (closeBankerCommand && state.round.state === "BANKER_BIDDING") {
-           addRoomMessage("USER", `${messageActor(identity.userId)} 结束抢庄`, { command: "CLOSE_BANKER_BIDDING" }, identity.userId);
-           return { command: "CLOSE_BANKER_BIDDING", result: await executeCloseBankerBidding(identity, key) };
+           const result = await executeCloseBankerBidding(identity, key);
+           addRoomMessage("USER", text, { command: "CLOSE_BANKER_BIDDING" }, identity.userId);
+           return { command: "CLOSE_BANKER_BIDDING", result };
          }
-         if (numeric && state.round.state === "BETTING") {
-           const amount = Number(numeric[1]);
-           addRoomMessage("USER", `${messageActor(identity.userId)} ${amount}`, { command: "BET", amount }, identity.userId);
-           return { command: "BET", result: await executeBet(identity, key, amount) };
+         if (state.round.state === "BETTING") {
+           const betCommand = parseChatBetCommand(text);
+           if (betCommand) {
+             const result = await executeBet(identity, key, betCommand.amount, "CHAT");
+             addRoomMessage("USER", text, { command: "BET", amount: betCommand.amount, mode: betCommand.mode }, identity.userId);
+             return { command: "BET", result };
+           }
          }
          if (closeCommand && state.round.state === "BETTING") {
-           addRoomMessage("USER", `${messageActor(identity.userId)} 停止下注`, { command: "CLOSE_BETTING" }, identity.userId);
-           return { command: "CLOSE_BETTING", result: await executeCloseBetting(identity, key) };
+           const result = await executeCloseBetting(identity, key);
+           addRoomMessage("USER", text, { command: "CLOSE_BETTING" }, identity.userId);
+           return { command: "CLOSE_BETTING", result };
          }
          if (confirmCommand && state.round.state === "WAITING_BANKER_CONFIRM") {
-           addRoomMessage("USER", `${messageActor(identity.userId)} 确认发红包`, { command: "CONFIRM_PACKET" }, identity.userId);
-           return { command: "CONFIRM_PACKET", result: await executeConfirmPacket(identity, key) };
+           const result = await executeConfirmPacket(identity, key);
+           addRoomMessage("USER", text, { command: "CONFIRM_PACKET" }, identity.userId);
+           return { command: "CONFIRM_PACKET", result };
+         }
+         if (claimCommand && state.round.state === "CLAIMING") {
+           const result = await executePacketClaim(identity, key);
+           addRoomMessage("USER", text, { command: "CLAIM_PACKET" }, identity.userId);
+           return { command: "CLAIM_PACKET", result };
          }
          if (restartCommand && state.round.state === "WAITING_BANKER_CONFIRM") {
            if (state.round.banker !== identity.userId) throw new Error("只有当前庄家可以重推本局");
            await transition("ROUND_CANCELLED", identity.userId, { reason: "banker requested restart", idempotencyKey: key });
+           addRoomMessage("USER", text, { command: "RESTART_ROUND" }, identity.userId);
            addRoomMessage("ROUND", "本局已按庄家请求取消，等待下一局重新抢庄。", { templateKey: "game.round.cancelled", roundId: state.round.id });
            return { command: "RESTART_ROUND", result: { state: state.round.state, cancelled: true } };
          }
@@ -501,11 +532,11 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
              command: "HELP",
              result: {
                state: state.round.state,
-               message: state.round.state === "BANKER_BIDDING" ? "发送数字抢庄，例如 600；最高者发送 结束抢庄" : state.round.state === "BETTING" ? "发送数字下注，例如 10；庄家发送 停止下注" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包，或发送 /重推 取消本局" : "请等待本局继续"
+               message: state.round.state === "BANKER_BIDDING" ? "发送数字抢庄，例如 600；最高者发送 结束抢庄" : state.round.state === "BETTING" ? "发送 2–17 下注，或发送 sh10–sh177 梭哈；庄家发送 停止下注" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包，或发送 /重推 取消本局" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "请等待本局继续"
              }
            };
          }
-         throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注阶段请输入整数金额，例如 10" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包或 /重推" : "当前阶段不接受聊天室指令");
+         throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
        });
      }
      const chatReadAlias = /^\/api\/chat\/rooms\/([^/]+)\/read$/.exec(originalPath);

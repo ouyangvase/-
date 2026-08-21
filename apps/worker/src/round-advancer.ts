@@ -6,6 +6,7 @@ type DueRound = { id: string; state: RoundState; state_version: number; state_en
 const timedCandidates: Partial<Record<RoundState, RoundState>> = {
   LOBBY: "BANKER_BIDDING",
   BANKER_BIDDING: "BETTING",
+  BETTING: "WAITING_BANKER_CONFIRM",
   PACKET_SENT: "CLAIMING",
   CLAIMING: "EVALUATING",
   EVALUATING: "SETTLING",
@@ -15,6 +16,7 @@ const timedCandidates: Partial<Record<RoundState, RoundState>> = {
 const nextStateDurationSeconds: Partial<Record<RoundState, number>> = {
   BANKER_BIDDING: 30,
   BETTING: 30,
+  WAITING_BANKER_CONFIRM: 60,
   CLAIMING: 45,
   EVALUATING: 10,
   SETTLING: 15
@@ -91,7 +93,7 @@ export async function advanceExpiredRounds(database: Project12Database, workerId
   if (!database.configured) return 0;
   const rows = await database.query<DueRound>(`SELECT id, state, state_version, state_ends_at FROM rounds
     WHERE state_ends_at IS NOT NULL AND state_ends_at <= now()
-      AND state IN ('LOBBY', 'BANKER_BIDDING', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING')
+      AND state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING')
     ORDER BY state_ends_at ASC LIMIT $1`, [limit]);
   let advanced = 0;
   for (const row of rows) if (await advanceRound(database, row, workerId)) advanced += 1;
