@@ -22,6 +22,25 @@ describe("API round flow", () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
+  it("unlocks the default demo preview user immediately after verification submit", async () => {
+    const auth = await request("/api/auth/telegram", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const authBody = await auth.json() as { token?: string };
+    const session = { "x-session-token": authBody.token! };
+    const submit = await request("/api/verification/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "default-demo-verification", ...session },
+      body: JSON.stringify({ legalName: "Demo Preview", tngAccountNo: "1234563123" })
+    });
+    expect((await submit.json()).result).toMatchObject({ status: "APPROVED", tngAccountLast4: "••••3123" });
+    await expect((await request("/api/verification/status", { headers: session })).json()).resolves.toMatchObject({ status: "APPROVED", canUseChat: true, canUseWallet: true });
+    expect((await request("/api/chat/room", { headers: session })).status).toBe(200);
+    expect((await request("/api/wallet", { headers: session })).status).toBe(200);
+  });
+
   it("persists the user-visible round sequence through the API boundary", async () => {
     const auth = await request("/api/auth/telegram", {
       method: "POST",
