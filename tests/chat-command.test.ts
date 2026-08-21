@@ -65,7 +65,7 @@ describe("internal chat game commands", () => {
     const blockedConfirm = await command(bankerSession, "确认发红包", "chat-command-bettor-confirm");
     expect(blockedConfirm.status).toBe(400);
     expect((await blockedConfirm.json()).error).toContain("庄家");
-    const confirm = await command(bettorSession, "确认发红包", "chat-command-confirm");
+    const confirm = await command(bettorSession, "确认发包", "chat-command-confirm");
     expect(confirm.status).toBe(200);
     expect((await confirm.json()).result.result.state).toBe("CLAIMING");
     const room = await request("/api/chat/room", { headers: bankerSession });

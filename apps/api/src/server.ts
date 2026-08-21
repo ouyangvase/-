@@ -164,7 +164,7 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   queueOutbox("ROUND_STATE_CHANGED", { ...event });
   audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload });
   if (to === "BETTING" && typeof payload.amount === "number") addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
-  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家发送「确认发红包」开始发红包；旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
+  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家发送「确认发包」开始发红包；旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
   if (to === "PACKET_SENT" && payload.bettingClosed === true) addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
   if (to === "EVALUATING" && typeof payload.claimedAt === "string") addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
   if (to === "ROUND_COMPLETE") addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入 Demo 账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
@@ -474,7 +474,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
           const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价)$/i.test(text);
           const closeCommand = /^(?:stop|close|停止下注|结束下注)$/i.test(text);
           const restartCommand = /^(?:\/重推|重推|restart|reopen)$/i.test(text);
-          const confirmCommand = /^(?:1|confirm|确认|确认发红包|开始发红包)$/i.test(text);
+          const confirmCommand = /^(?:1|confirm|确认|确认发包|确认发红包|开始发红包)$/i.test(text);
           const claimCommand = /^(?:抢红包|领红包|开红包|claim|open|open\s*packet)$/i.test(text);
           if ((text === "1" || text === "0") && state.round.state === "ROUND_COMPLETE") {
             if (text === "1") {
@@ -532,11 +532,11 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
              command: "HELP",
              result: {
                state: state.round.state,
-               message: state.round.state === "BANKER_BIDDING" ? "发送数字抢庄，例如 600；最高者发送 结束抢庄" : state.round.state === "BETTING" ? "发送 2–17 下注，或发送 sh10–sh177 梭哈；庄家发送 停止下注" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包，或发送 /重推 取消本局" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "请等待本局继续"
+              message: state.round.state === "BANKER_BIDDING" ? "发送数字抢庄，例如 600；最高者发送 结束抢庄" : state.round.state === "BETTING" ? "发送 2–17 下注，或发送 sh10–sh177 梭哈；庄家发送 停止下注" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包，或发送 /重推 取消本局" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "请等待本局继续"
              }
            };
          }
-         throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发红包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
+        throw new Error(state.round.state === "BANKER_BIDDING" ? "抢庄阶段请输入整数庄金，例如 600，或由当前最高庄金玩家发送 结束抢庄" : state.round.state === "BETTING" ? "下注格式：发送 2–17，或发送 sh10–sh177；每局只能下注一次" : state.round.state === "WAITING_BANKER_CONFIRM" ? "请庄家发送 确认发包或 /重推" : state.round.state === "CLAIMING" ? "本局参与者发送 抢红包 领取内部红包" : "当前阶段不接受聊天室指令");
        });
      }
      const chatReadAlias = /^\/api\/chat\/rooms\/([^/]+)\/read$/.exec(originalPath);
