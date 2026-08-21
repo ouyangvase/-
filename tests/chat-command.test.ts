@@ -39,7 +39,7 @@ describe("internal chat game commands", () => {
     await approve("chat-command-bettor", bettorSession, "chat-command-bettor");
     const spectatorSession = await authenticate("chat-command-spectator", "en");
     await approve("chat-command-spectator", spectatorSession, "chat-command-spectator");
-    const command = (session: Record<string, string>, text: string, key: string) => request("/api/chat/room/command", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
+    const command = (session: Record<string, string>, text: string, key: string) => request("/api/chat/rooms/room-12/messages", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, ...session }, body: JSON.stringify({ text }) });
 
     const chatMessage = await command(spectatorSession, "大家好，等这一局开始。", "chat-command-message");
     expect(chatMessage.status).toBe(200);
@@ -60,7 +60,7 @@ describe("internal chat game commands", () => {
     const closeBidding = await command(bettorSession, "抢庄结束", "chat-command-close-bidding");
     expect(closeBidding.status).toBe(200);
     expect((await closeBidding.json()).result.result.state).toBe("BETTING");
-    const bet = await command(bankerSession, "梭哈 10", "chat-command-bet");
+    const bet = await command(bankerSession, "下注 5", "chat-command-bet");
     expect(bet.status).toBe(200);
     expect((await bet.json()).result.result.state).toBe("BETTING");
     const invalidBet = await command(bettorSession, "18", "chat-command-invalid-bet");
@@ -77,7 +77,7 @@ describe("internal chat game commands", () => {
     expect((await confirm.json()).result.result.state).toBe("CLAIMING");
     const room = await request("/api/chat/room", { headers: bankerSession });
     const roomBody = await room.json() as { messages: Array<{ body: string }> };
-    expect(roomBody.messages.some((message) => message.body === "梭哈 10")).toBe(true);
+    expect(roomBody.messages.some((message) => message.body === "下注 5")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "大家好，等这一局开始。" && message.type === "USER")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "18")).toBe(false);
     expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
