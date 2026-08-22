@@ -79,6 +79,8 @@ async function publishDatabaseOutbox(row: OutboxRow): Promise<void> {
     const launchToken = update && Number.isFinite(updateId) ? await prepareLaunchToken(updateId, update) : undefined;
     const response = update ? handleTelegramUpdate(update, { launchToken }) : null;
     if (response) {
+      const callbackQueryId = update?.callback_query?.id;
+      if (callbackQueryId && process.env.TELEGRAM_BOT_TOKEN) await sendBotApi("answerCallbackQuery", { callback_query_id: callbackQueryId });
       if (!process.env.TELEGRAM_BOT_TOKEN) {
         if (appMode !== "demo") throw new Error("AUTHORIZATION_REQUIRED: TELEGRAM_BOT_TOKEN is not configured");
       } else {

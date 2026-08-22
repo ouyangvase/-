@@ -9,10 +9,11 @@ test("captures the required onboarding, chat, wallet and social visual states", 
     localStorage.removeItem("project12_device_public_key");
   });
   await page.route("**/api/auth/telegram", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: "visual-qa-session", user: { id: "visual-qa-player", username: "visualqa" } })
+    const request = route.request();
+    const payload = JSON.parse(request.postData() ?? "{}");
+    await route.continue({
+      headers: { ...request.headers(), "content-type": "application/json" },
+        postData: JSON.stringify({ ...payload, demoUser: "demo-player-01" })
     });
   });
   await page.route("**/api/onboarding/**", async (route) => {
@@ -41,21 +42,23 @@ test("captures the required onboarding, chat, wallet and social visual states", 
   await expect(page.getByRole("heading", { name: "游戏大厅" })).toBeVisible();
   await shot("visual-qa-05-hall");
   await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
-  await expect(page.locator(".topbar-title h1")).toHaveText("我的聊天");
+  await expect(page.getByRole("heading", { name: "我的聊天" })).toBeVisible();
   await shot("visual-qa-06-chat-list");
   await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
-  await expect(page.locator(".topbar-title h1")).toContainText("十二牛牛游戏群");
+  await expect(page.getByRole("heading", { name: /十二牛牛游戏群 2/ })).toBeVisible();
+  await expect(page.locator(".chat-connection-status")).toContainText("实时连接", { timeout: 5000 });
   await shot("visual-qa-06-internal-chat");
-  await page.getByRole("button", { name: "返回" }).click();
+  await page.goBack();
   await page.getByRole("button", { name: "钱包", exact: true }).click();
   await expect(page.getByRole("heading", { name: "我的钱包" })).toBeVisible();
   await shot("visual-qa-07-wallet");
   await page.getByRole("button", { name: "聊天", exact: true }).click();
-  await expect(page.locator(".topbar-title h1")).toHaveText("我的聊天");
+  await expect(page.getByRole("heading", { name: "我的聊天" })).toBeVisible();
   await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
-  await expect(page.locator(".topbar-title h1")).toContainText("十二牛牛游戏群");
+  await expect(page.getByRole("heading", { name: /十二牛牛游戏群 2/ })).toBeVisible();
+  await expect(page.locator(".chat-connection-status")).toContainText("实时连接", { timeout: 5000 });
   await shot("visual-qa-08-chat-reopened");
-  await page.getByRole("button", { name: "返回" }).click();
+  await page.goBack();
   await page.getByRole("button", { name: "我", exact: true }).click();
   await shot("visual-qa-09-profile");
   await page.getByRole("button", { name: /语言与通知/ }).click();

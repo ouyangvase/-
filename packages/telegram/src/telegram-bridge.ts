@@ -30,7 +30,10 @@ export interface TelegramWebAppLike {
 }
 
 export function getTelegramWebApp(): TelegramWebAppLike | undefined {
-  return (globalThis as typeof globalThis & { Telegram?: { WebApp?: TelegramWebAppLike } }).Telegram?.WebApp;
+  const webApp = (globalThis as typeof globalThis & { Telegram?: { WebApp?: TelegramWebAppLike } }).Telegram?.WebApp;
+  // The official bridge script also exposes a placeholder WebApp object in a
+  // normal browser. Treat only an initialized Telegram launch as the runtime.
+  return webApp?.initData?.trim() ? webApp : undefined;
 }
 
 export function isTelegramWebApp(): boolean { return Boolean(getTelegramWebApp()); }

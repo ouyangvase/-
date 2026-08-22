@@ -38,9 +38,9 @@ const onboarding = new Map<string, { deviceBound: boolean; referrerBound: boolea
 const verificationStates = new Map<string, VerificationSnapshot>();
 const demoVerifiedUserId = "demo-player-01";
 const roomMessages: RoomMessage[] = [
-  { id: "MSG-0001", type: "SYSTEM", body: "平台通知：本房间使用内部 Demo 红包，积分无现金价值。", createdAt: now(), payload: {} },
-  { id: "MSG-0002", type: "ROUND", body: "平台通知：回合 R-0247 已开启，等待玩家抢庄。", createdAt: now(), payload: { roundId: "R-0247" } },
-  { id: "MSG-0003", type: "BANKER", body: "平台通知：开始抢庄，玩家发送整数庄金，结束后最高者成为庄家。", createdAt: now(), payload: { templateKey: "game.banker.started" } }
+  { id: "MSG-0001", type: "SYSTEM", body: "平台通知：本房间使用内部 Demo 红包，积分无现金价值。", createdAt: now(), payload: { pinned: true } },
+  { id: "MSG-0002", type: "ROUND", body: "平台通知：回合 R-0247 已开启，等待玩家抢庄。", createdAt: now(), payload: { roundId: "R-0247", pinned: true } },
+  { id: "MSG-0003", type: "BANKER", body: "平台通知：开始抢庄，玩家发送整数庄金，结束后最高者成为庄家。", createdAt: now(), payload: { templateKey: "game.banker.started", pinned: true } }
 ];
 const outboxEvents: Array<{ id: string; type: string; payload: Record<string, unknown>; createdAt: string; publishedAt?: string }> = [];
 const webhookUpdateIds = new Set<number>();
@@ -54,7 +54,7 @@ const riskFlags: Array<{ id: string; userId?: string; roundId?: string; status: 
   { id: "RF-018", roundId: "R-0247", status: "HELD", reason: "Fast round completion", createdAt: now() }
 ];
 const adjustments = new Map<string, { id: string; amount: number; reason: string; ticketId: string; createdBy: string; approvedBy?: string; status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED" }>();
-const serverSeed = "project12-demo-seed-247";
+const serverSeed = process.env.PROJECT12_SERVER_SEED ?? "project12-demo-seed-247";
 const packetProvider = createPacketProvider(persistence);
 
 const baseState: DemoState = {
@@ -160,6 +160,13 @@ function canViewRoomMessage(message: RoomMessage, userId: string): boolean {
 }
 function writeRoomEvent(response: ServerResponse, event: RoomMessage) { if (response.writableEnded || response.destroyed) return false; try { response.write(`event: message\ndata: ${JSON.stringify(event)}\n\n`); return true; } catch { return false; } }
 function broadcastRoomEvent(event: RoomMessage) { for (const [response, userId] of roomRealtimeClients) { if (canViewRoomMessage(event, userId) && !writeRoomEvent(response, event)) roomRealtimeClients.delete(response); } }
+function publishSupabaseRoomBroadcast(event: RoomMessage): void {
+  if (event.visibility !== "PUBLIC_ROOM") return;
+  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return;
+  void fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-room-12", event: "message", payload: { message: event } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
+}
 function stateDeadline(to: RoundState): Date | null { const seconds: Partial<Record<RoundState, number>> = { BANKER_BIDDING: 30, BETTING: 30, WAITING_BANKER_CONFIRM: 60, CLAIMING: 45, EVALUATING: 10, SETTLING: 15 }; return seconds[to] === undefined ? null : new Date(Date.now() + seconds[to]! * 1000); }
 async function transition(to: RoundState, actor: string, payload: Record<string, unknown> = {}) {
   const from = state.round.state;
@@ -224,12 +231,37 @@ function verificationInput(data: Record<string, unknown>): { legalName: string; 
   return { legalName, tngAccountNo };
 }
 function messageActor(userId: string): string { return userId === state.user.id ? "你" : `玩家-${userId.slice(-4)}`; }
+async function chatAttachmentInput(data: Record<string, unknown>): Promise<{ name: string; mime: string; size: number; dataUrl?: string; url?: string } | undefined> {
+  const raw = data.attachment;
+  if (!raw || typeof raw !== "object") return undefined;
+  const input = raw as Record<string, unknown>;
+  const name = typeof input.name === "string" ? input.name.trim().slice(0, 120) : "聊天图片";
+  const dataUrl = typeof input.dataUrl === "string" ? input.dataUrl : "";
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error("图片格式无效，只支持 JPG、PNG 或 WebP");
+  const bytes = Buffer.from(match[2], "base64");
+  if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) throw new Error("图片不能超过 10MB");
+  const mime = match[1];
+  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "chat-attachments";
+  if (supabaseUrl && serviceKey) {
+    const extension = mime === "image/jpeg" ? "jpg" : mime.slice("image/".length);
+    const objectPath = `room-12/${Date.now()}-${randomBytes(8).toString("hex")}.${extension}`;
+    const upload = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath}`, { method: "POST", headers: { authorization: `Bearer ${serviceKey}`, apikey: serviceKey, "content-type": mime, "x-upsert": "false" }, body: bytes });
+    if (!upload.ok) throw new Error("图片上传失败，请稍后重试");
+    return { name, mime, size: bytes.length, url: `${supabaseUrl}/storage/v1/object/public/${bucket}/${objectPath}` };
+  }
+  if (appMode !== "demo") throw new Error("图片存储尚未配置，请联系管理员");
+  return { name, mime, size: bytes.length, dataUrl };
+}
 async function addRoomMessage(type: string, message: string, payload: Record<string, unknown> = {}, userId?: string, visibility: "PUBLIC_ROOM" | "PARTICIPANTS_ONLY" | "TARGET_USER" | "ADMIN_ONLY" = "PUBLIC_ROOM", targetUserId?: string): Promise<void> {
   const templateKey = typeof payload.templateKey === "string" ? payload.templateKey : undefined;
   const entry: RoomMessage = { id: `MSG-${String(roomMessages.length + 1).padStart(4, "0")}`, type, body: message, createdAt: now(), payload, ...(templateKey ? { templateKey } : {}), visibility, ...(userId ? { actor: messageActor(userId) } : {}), ...(targetUserId ? { targetUserId } : {}) };
   await persistence.persistRoomMessage({ type, body: message, payload, templateKey, userId, visibility, targetUserId });
   roomMessages.push(entry);
   broadcastRoomEvent(entry);
+  publishSupabaseRoomBroadcast(entry);
   queueOutbox("INTERNAL_CHAT_MESSAGE", { messageId: entry.id, roundId: state.round.id, type, body: message, payload, visibility, targetUserId });
 }
 async function executeBid(identity: { userId: string }, key: string, amount: number) {
@@ -481,17 +513,22 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "POST" && url.pathname === "/api/onboarding/pin") { const identity = requirePlayer(request, response); if (!identity) return undefined; return writeIdempotent(request, response, async (key) => { const data = await body(request); if (!validPin(data.pin)) throw new Error("PIN must be six digits and not a repeated or sequential demo PIN"); const current = onboardingState(identity.userId); const encodedHash = await hashPin(data.pin); securityPins.set(identity.userId, { hash: encodedHash, changedAt: now() }); await persistence.persistPin(identity.userId, encodedHash); current.pinSet = true; audit(identity.userId, "SECURITY_PIN_SET", "USER", identity.userId, undefined, { idempotencyKey: key, algorithm: "scrypt" }); return { status: "SET", pinSet: true }; }); }
     if (request.method === "GET" && url.pathname === "/api/hall") return json(response, 200, hallSnapshot());
     if (request.method === "GET" && url.pathname === "/api/announcements") return json(response, 200, demoAnnouncements);
-    if (request.method === "GET" && url.pathname === "/api/rooms") return json(response, 200, [roomSummary()]);
-    if (request.method === "GET" && url.pathname === "/api/rooms/room-12") return json(response, 200, roomSummary());
+    if (request.method === "GET" && url.pathname === "/api/rooms") { const identity = await requireVerifiedPlayer(request, response); return identity ? json(response, 200, [roomSummary()]) : undefined; }
+    if (request.method === "GET" && url.pathname === "/api/rooms/room-12") { const identity = await requireVerifiedPlayer(request, response); return identity ? json(response, 200, roomSummary()) : undefined; }
      if (request.method === "GET" && url.pathname === "/api/chat/room") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; const before = url.searchParams.get("before") || undefined; const limit = before ? 30 : 50; const messages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, before, limit) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).slice(-(before ? 30 : 50)); return json(response, 200, { roomId: "room-12", roomName: "十二牛牛游戏群", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool, messages, hasMore: messages.length === limit }); }
      if (request.method === "GET" && url.pathname === "/api/chat/room/realtime") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); const messages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, undefined, 50) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).slice(-50); for (const message of messages) writeRoomEvent(response, message); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } roomRealtimeClients.set(response, identity.userId); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); roomRealtimeClients.delete(response); }); return; }
      if (request.method === "POST" && url.pathname === "/api/chat/room/command") {
        const identity = await requireVerifiedPlayer(request, response);
        if (!identity) return undefined;
        return writeIdempotent(request, response, async (key) => {
-         const data = await body(request);
-          const text = typeof data.text === "string" ? data.text.trim().slice(0, 240) : typeof data.body === "string" ? data.body.trim().slice(0, 240) : "";
-         if (!text) throw new Error("请输入聊天消息或游戏指令");
+          const data = await body(request);
+          const attachment = await chatAttachmentInput(data);
+           const text = typeof data.text === "string" ? data.text.trim().slice(0, 240) : typeof data.body === "string" ? data.body.trim().slice(0, 240) : "";
+          if (attachment) {
+            await addRoomMessage("USER", text || `📷 ${attachment.name}`, { messageType: "IMAGE", attachment }, identity.userId);
+            return { command: "MESSAGE", result: { state: state.round.state, message: text, attachment: true } };
+          }
+          if (!text) throw new Error("请输入聊天消息或游戏指令");
           const numeric = /^(?:(?:sh|shove|梭哈|下注|bet)\s*)?(\d+)$/.exec(text.toLowerCase());
           const bankerNumeric = /^(?:(?:抢庄|竞庄|庄|bid)\s*)?(\d+)$/i.exec(text);
           const closeBankerCommand = /^(?:stop\s*banker|close\s*banker|停止抢庄|结束抢庄|结束竞价|抢庄结束|封盘抢庄)$/i.test(text);

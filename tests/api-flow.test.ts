@@ -75,6 +75,8 @@ describe("API round flow", () => {
     expect(lockedWallet.status).toBe(403);
     const lockedChat = await request("/api/chat/room", { headers: session });
     expect(lockedChat.status).toBe(403);
+    expect((await request("/api/chat/rooms", { headers: session })).status).toBe(403);
+    expect((await request("/api/game/rooms/room-12", { headers: session })).status).toBe(403);
     const approve = await request("/api/admin/verifications/api-flow-user/approve", {
       method: "POST",
       headers: { "content-type": "application/json", "x-demo-admin-token": "admin-demo-only", "idempotency-key": "api-flow-review" },

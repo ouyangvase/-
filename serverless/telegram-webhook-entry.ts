@@ -54,6 +54,8 @@ export default async function handler(request: IncomingMessage, response: Server
       claimedBy = `webhook:${updateId}`;
       if (!await persistence.claimTelegramUpdate(updateId, claimedBy)) return writeJson(response, 200, { ok: true, duplicate: true, updateId });
       const launchToken = await prepareLaunchToken(persistence, updateId, stored.payload as TelegramUpdate);
+      const callbackQueryId = (stored.payload as TelegramUpdate).callback_query?.id;
+      if (callbackQueryId) await sendBotApi("answerCallbackQuery", { callback_query_id: callbackQueryId });
       const reply = handleTelegramUpdate(stored.payload as TelegramUpdate, { launchToken });
       if (reply) await sendBotApi("sendMessage", reply as unknown as Record<string, unknown>);
       await persistence.markTelegramUpdatePublished(updateId);

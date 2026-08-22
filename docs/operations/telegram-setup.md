@@ -29,7 +29,7 @@ pnpm staging:preflight
 
 The Vercel webhook handles `/start` replies and retry-safe delivery directly. Deploy the long-running Worker separately for approval notifications, private status notifications and expiry transitions. Set `REQUIRE_WORKER=true` after that Worker is healthy; without it, the API can accept writes but the notification outbox will not be delivered.
 
-The API uses the `pg` driver directly against Supabase Postgres; it does not use Supabase REST, the Supabase client SDK or Supabase Realtime. Use `DATABASE_URL` for the serverless API/Worker and `DIRECT_URL` for migrations when the provider exposes separate pooler and direct connection strings. No Supabase secret key belongs in the Mini App bundle.
+The API uses the `pg` driver directly against Supabase Postgres. When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured server-side, public room messages are also sent through the Supabase Realtime Broadcast REST endpoint; the Mini App may subscribe with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to receive public fan-out and presence. SSE remains the fallback and permission boundary. Participant-only packet messages are never broadcast publicly, and no service key belongs in the Mini App bundle. Use `DATABASE_URL` for the serverless API/Worker and `DIRECT_URL` for migrations when the provider exposes separate pooler and direct connection strings.
 
 The repository currently uses mock Telegram authentication only when `APP_MODE=demo` and `TELEGRAM_MOCK_ENABLED=true`. Outside demo, `/api/auth/telegram` accepts either fresh signed `initData` or a short-lived, one-time launch grant issued by the webhook for reply-keyboard `/start` launches. Never put the Bot token in client-side environment variables.
 

@@ -23,7 +23,9 @@ export type BotCommand = { command: string; description: string };
 export type MenuButtonConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type MainMiniAppConfig = { type: "web_app"; text: string; web_app: { url: string } };
 export type NotificationPayload = { chat_id: string | number; text: string; disable_web_page_preview: true; reply_markup?: InlineKeyboardMarkup };
-export type TelegramUpdate = { update_id?: number; message?: { chat?: { id?: string | number }; from?: { id?: string | number; username?: string; language_code?: string }; text?: string } };
+export type TelegramMessage = { chat?: { id?: string | number }; from?: { id?: string | number; username?: string; language_code?: string }; text?: string; web_app_data?: { data?: string; button_text?: string } };
+export type TelegramCallbackQuery = { id?: string; from?: { id?: string | number; language_code?: string }; message?: TelegramMessage; data?: string };
+export type TelegramUpdate = { update_id?: number; message?: TelegramMessage; callback_query?: TelegramCallbackQuery };
 
 const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? process.env.MINIAPP_ORIGIN ?? "http://localhost:4173";
 const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? process.env.BOT_USERNAME ?? "project12_demo_bot";
@@ -150,7 +152,22 @@ export function handleMockUpdate(update: { message?: { chat?: { id?: string | nu
   return buildCommandMessage(message.chat.id, command, startParam, launchToken, locale ?? resolveLocale(undefined, update.message?.from?.language_code, defaultLocale()));
 }
 
+function handleCallbackQuery(update: TelegramUpdate): BotMessage | NotificationPayload | null {
+  const callback = update.callback_query;
+  const chatId = callback?.message?.chat?.id;
+  if (chatId === undefined) return null;
+  const locale = resolveLocale(undefined, callback?.from?.language_code, defaultLocale());
+  const data = callback?.data?.trim();
+  if (data === "open" || data === "open:hall" || data === "open_hall") return buildWelcomeMessage(chatId, "", undefined, locale);
+  return buildRoundNotification(chatId, "BOT", locale === "zh-CN" ? "请在小程序内完成这项操作。" : "Please complete this action inside the Mini App.", locale);
+}
+
 export function handleTelegramUpdate(update: TelegramUpdate, options: { launchToken?: string } = {}): BotMessage | NotificationPayload | null {
+  if (update.callback_query) return handleCallbackQuery(update);
+  if (update.message?.web_app_data?.data?.trim() && update.message.chat?.id !== undefined) {
+    const locale = resolveLocale(undefined, update.message.from?.language_code, defaultLocale());
+    return buildRoundNotification(update.message.chat.id, "WEB_APP", locale === "zh-CN" ? "已收到小程序操作。" : "Mini App action received.", locale);
+  }
   return handleMockUpdate(update, options.launchToken);
 }
 
@@ -187,7 +204,7 @@ async function configureWebhook(): Promise<void> {
   await sendBotApi("setWebhook", {
     url: webhookUrl,
     secret_token: process.env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message"]
+    allowed_updates: ["message", "callback_query"]
   });
 }
 

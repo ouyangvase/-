@@ -19,6 +19,11 @@ describe("Telegram bot adapter", () => {
     expect(handleTelegramUpdate({ message: { chat: { id: 1 }, text: "/start ref_1163699415" } })).not.toBeNull();
   });
 
+  it("processes callback queries and Mini App data updates", () => {
+    expect(handleTelegramUpdate({ callback_query: { id: "callback-1", data: "open:hall", message: { chat: { id: 1 } } } })).toMatchObject({ chat_id: 1 });
+    expect(handleTelegramUpdate({ message: { chat: { id: 1 }, web_app_data: { data: JSON.stringify({ action: "open" }) } } })).toMatchObject({ chat_id: 1 });
+  });
+
   it("publishes the canonical Telegram command contract", () => {
     expect(botCommands.map((command) => command.command)).toEqual(["start", "open", "wallet", "chat", "verification", "support", "language"]);
   });
