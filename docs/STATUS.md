@@ -6,7 +6,7 @@
 
 - 分支：`goal/telegram-internal-chat-game`
 - 最新本地提交：`4f79f22`
-- 最新公开 Preview：`https://project-12-demo-staging-public-lfjs6t7oh-tomupros-projects.vercel.app`
+- 稳定公开地址：`https://project-12-demo-staging-public.vercel.app`
 - 产品形态：Telegram Mini App，手机优先；游戏发生在 Mini App 内部聊天室
 - 真实现金、TNG 充值、提现和现金奖励：关闭
 
