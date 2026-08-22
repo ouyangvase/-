@@ -33,7 +33,11 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   await expect(page.locator(".chat-stage-status")).toContainText("抢庄阶段");
   await expect(page.locator(".chat-composer-v2")).toBeVisible();
   await expect(page.locator(".bottom-nav")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "返回聊天列表" })).toBeVisible();
+  await page.getByRole("button", { name: "返回聊天列表" }).click();
+  await expect(page.locator("[data-chat-inbox]")).toBeVisible();
+  await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
+  await expect(page.locator(".chat-room-screen")).toBeVisible();
   await expect(page.locator(".chat-command-row")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "100", exact: true })).toHaveCount(0);
   for (const route of ["/game/12", "/rooms/room-12", "/rounds/R-0247"]) {
@@ -73,6 +77,17 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   await page.getByRole("button", { name: "我的账号" }).click();
   await page.getByRole("button", { name: "每日奖励" }).click();
   await expect(page.getByRole("heading", { name: "每日奖励" })).toBeVisible();
+  await page.getByRole("button", { name: "返回" }).click();
+  await page.getByRole("button", { name: "我的账号" }).click();
+  const profileRows = page.locator(".settings-list button");
+  await expect(profileRows).toHaveCount(8);
+  await expect(profileRows.first().locator("strong")).toHaveCSS("white-space", "nowrap");
+  await expect(profileRows.first().locator(".icon")).toBeVisible();
+  await profileRows.first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "取消" }).click();
+  await profileRows.nth(1).click();
+  await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
 });
 
 test("Telegram runtime cannot silently continue when the API is unavailable", async ({ page }) => {

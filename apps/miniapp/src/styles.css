@@ -126,7 +126,7 @@ body { overflow-x: hidden; background: #000; }
   border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .chat-inbox-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -.04em; }
-.chat-icon-button, .chat-room-more, .chat-composer-icon {
+.chat-icon-button, .chat-room-back, .chat-room-more, .chat-composer-icon {
   display: grid;
   place-items: center;
   border: 0;
@@ -134,7 +134,7 @@ body { overflow-x: hidden; background: #000; }
   background: transparent;
 }
 .chat-icon-button { position: absolute; right: 0; width: 44px; height: 44px; border-radius: 50%; }
-.chat-icon-button:hover, .chat-room-more:hover, .chat-composer-icon:hover { color: #fff; background: rgba(255,255,255,.07); }
+.chat-icon-button:hover, .chat-room-back:hover, .chat-room-more:hover, .chat-composer-icon:hover { color: #fff; background: rgba(255,255,255,.07); }
 .chat-search-field {
   display: flex;
   min-height: 44px;
@@ -214,6 +214,7 @@ body { overflow-x: hidden; background: #000; }
 .chat-room-header-v2 h1 { overflow: hidden; font-size: 18px; font-weight: 700; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
 .chat-room-header-v2 small { display: block; margin-top: 4px; color: rgba(241,239,232,.45); font-size: 11px; }
 .chat-room-header-side { width: 44px; height: 44px; }
+.chat-room-back { justify-self: start; border-radius: 50%; }
 .chat-room-count { display: inline-flex; min-width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0 5px; border-radius: 7px; color: #dfe7f6; background: #53677f; font-size: 13px; vertical-align: 1px; }
 .chat-room-more { width: 44px; height: 44px; border-radius: 50%; justify-self: end; }
 .chat-pinned-bar {
@@ -516,8 +517,10 @@ body { overflow-x: hidden; background: #000; }
 .profile-hero h1 { margin-top: 7px; font-size: 25px; letter-spacing: -.05em; }
 .profile-hero p { margin-top: 5px; color: var(--muted); font: 10px ui-monospace, monospace; }
 .settings-list { border-top: 1px solid var(--hairline); }
-.settings-list button { grid-template-columns: 1fr 18px; gap: 12px; min-height: 64px; padding: 11px 0; border-bottom-color: rgba(255,255,255,.08); }
-.settings-list button strong { margin-top: 4px; color: var(--paper); font-size: 14px; }
+.settings-list button { grid-template-columns: minmax(96px, auto) minmax(0, 1fr) 18px; gap: 12px; min-height: 64px; padding: 11px 0; border-bottom-color: rgba(255,255,255,.08); }
+.settings-list button > .eyebrow { min-width: 0; white-space: nowrap; }
+.settings-list button > strong { min-width: 0; margin-top: 0; overflow: hidden; color: var(--paper); font-size: 14px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.settings-list button > .icon { justify-self: end; }
 .verification-modal .mechanism-input { border-radius: 12px; }
 .verification-close { width: 100%; }
 .bottom-nav { max-width: 448px; border: 1px solid rgba(255,255,255,.1); border-radius: 24px; background: rgba(43,44,50,.94); }

@@ -176,7 +176,7 @@ function ChatComposer({ draft, setDraft, sending, connection, onSubmit, onEmoji,
   return <form className="chat-composer-v2" data-game-input="chat-text-only" onSubmit={onSubmit}><div className="chat-stage-status"><ConnectionStatus status={connection} /><span>{hint}</span></div><div className="chat-composer-row"><button type="button" className="chat-composer-icon" aria-label="表情" onClick={onEmoji}><ChatIcon name="smile" /></button><div className="chat-composer-field"><input data-chat-command-input="true" name="chatMessage" type="text" inputMode="text" enterKeyHint="send" autoComplete="off" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="发送消息…" aria-label="我的聊天" /><button type="submit" aria-label="发送" disabled={sending || !draft.trim()}><ChatIcon name="send" /></button></div><button type="button" className="chat-composer-icon" aria-label="添加附件" onClick={onPlus}><ChatIcon name="plus" /></button></div>{error && <p className="chat-composer-error" role="alert">{error}</p>}</form>;
 }
 
-export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onCommand, formatMessage }: { state: DemoState; apiUrl: string; sessionToken: string; locale: Locale; onCommand: (command: string, result: unknown) => void; formatMessage: (message: ChatMessage) => string }) {
+export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, onCommand, formatMessage }: { state: DemoState; apiUrl: string; sessionToken: string; locale: Locale; onBack: () => void; onCommand: (command: string, result: unknown) => void; formatMessage: (message: ChatMessage) => string }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const firstLoadRef = useRef(true);
@@ -356,7 +356,7 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onCommand,
   };
 
   return <section className="chat-room-screen" data-chat-mode="text-only">
-    <header className="chat-room-header-v2"><span className="chat-room-header-side" /><div><h1>十二牛牛游戏群 <span className="chat-room-count">2</span> <span className="chat-verified" aria-label="已验证"><ChatIcon name="verified" /></span></h1></div><button type="button" className="chat-room-more" aria-label="更多" onClick={() => setActivityOpen(true)}><ChatIcon name="more" /></button></header>
+    <header className="chat-room-header-v2"><button type="button" className="chat-room-back chat-room-header-side" aria-label="返回聊天列表" onClick={onBack}><ChatIcon name="chevron" /></button><div><h1>十二牛牛游戏群 <span className="chat-room-count">2</span> <span className="chat-verified" aria-label="已验证"><ChatIcon name="verified" /></span></h1></div><button type="button" className="chat-room-more" aria-label="更多" onClick={() => setActivityOpen(true)}><ChatIcon name="more" /></button></header>
     <button className="chat-pinned-bar" type="button" onClick={() => setPinnedOpen(true)}><ChatIcon name="pin" /><span><strong>置顶消息（4）</strong><small>{previewText(pinnedMessages[0])}</small></span><ChatIcon name="chevron" /></button>
     <div className="chat-message-viewport" ref={viewportRef} onScroll={handleScroll}>
       <div className="chat-message-list-v2" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
