@@ -20,8 +20,13 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
   await expect(page.locator("[data-chat-inbox]")).toBeVisible();
   await expect(page.getByRole("heading", { name: "我的聊天" })).toBeVisible();
+  await expect(page.locator("main.app-shell-chat")).toHaveCSS("padding-left", "0px");
+  const inboxShell = await page.locator("main.app-shell-chat").evaluate((element) => { const rect = element.getBoundingClientRect(); return { width: rect.width, height: rect.height }; });
+  expect(inboxShell.width).toBeLessThanOrEqual(480);
+  expect(inboxShell.height).toBeGreaterThan(0);
   await page.getByRole("button", { name: /进入游戏聊天室：12牛牛/ }).click();
   await expect(page.locator(".chat-room-screen")).toBeVisible();
+  await expect(page.locator("main.app-shell-room")).toHaveCSS("padding-left", "0px");
   await expect(page.getByRole("heading", { name: /十二牛牛游戏群 2/ })).toBeVisible();
   await expect(page.locator(".chat-pinned-bar")).toContainText("置顶消息（4）");
   await expect(page.getByRole("textbox", { name: "我的聊天" })).toBeVisible();
