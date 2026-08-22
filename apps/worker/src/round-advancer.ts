@@ -27,8 +27,8 @@ async function insertInternalChatMessage(client: QueryExecutor, roundId: string,
   const event = { messageId, roundId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM" };
   await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('INTERNAL_CHAT_MESSAGE', $1::jsonb)", [JSON.stringify(event)]);
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (supabaseUrl && serviceKey) void fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-room-12", event: "message", payload: { message: { id: messageId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date().toISOString() } } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
+  if (supabaseUrl && serviceKey) void fetch(`${supabaseUrl}/realtime/v1/api/broadcast?private=true`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-12", event: "message", payload: { message: { id: messageId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date().toISOString() } } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 async function insertStateEvent(client: QueryExecutor, roundId: string, from: RoundState, to: RoundState, stateVersion: number, workerId: string, payload: Record<string, unknown>): Promise<void> {

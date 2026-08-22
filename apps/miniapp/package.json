@@ -2,6 +2,18 @@
   "name": "@project12/miniapp",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite --port 4173", "build": "vite build" },
-  "dependencies": { "@project12/config": "workspace:*", "@project12/contracts": "workspace:*", "@project12/game-engine": "workspace:*", "@project12/i18n": "workspace:*", "@project12/telegram": "workspace:*", "react": "^19.0.0", "react-dom": "^19.0.0" }
+  "scripts": {
+    "dev": "vite --port 4173",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@project12/config": "workspace:*",
+    "@project12/contracts": "workspace:*",
+    "@project12/game-engine": "workspace:*",
+    "@project12/i18n": "workspace:*",
+    "@project12/telegram": "workspace:*",
+    "@tanstack/react-virtual": "^3.14.10",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
 }

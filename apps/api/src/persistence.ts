@@ -89,6 +89,21 @@ export class ApiPersistence implements PacketStore {
     return this.database.health();
   }
 
+  async resolveDatabaseUserId(telegramUserId: string): Promise<string | undefined> {
+    if (!this.configured) return undefined;
+    const rows = await this.database.query<{ user_id: string }>("SELECT user_id::text FROM telegram_identities WHERE telegram_user_id = $1", [telegramUserId]);
+    return rows[0]?.user_id;
+  }
+
+  async ensureRoomMember(telegramUserId: string): Promise<void> {
+    await this.run(() => this.database.query(`INSERT INTO room_members (room_id, user_id, left_at)
+      SELECT r.room_id, ti.user_id, NULL
+      FROM rounds r
+      JOIN telegram_identities ti ON ti.telegram_user_id = $1
+      WHERE r.id = $2
+      ON CONFLICT (room_id, user_id) DO UPDATE SET left_at = NULL`, [telegramUserId, this.roundDatabaseId]).then(() => undefined));
+  }
+
   async loadVerification(telegramUserId: string): Promise<VerificationSnapshot | undefined> {
     if (!this.configured) return undefined;
     const rows = await this.database.query<{ status: VerificationStatus; submitted_at: string | Date; tng_account_last4: string; rejection_reason?: string | null }>(`SELECT iv.status, iv.submitted_at, iv.tng_account_last4, iv.rejection_reason

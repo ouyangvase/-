@@ -4,6 +4,8 @@ type SupabaseRealtimeOptions = {
   roomId: string;
   userId: string;
   displayName: string;
+  accessToken: string;
+  refreshAccessToken?: () => Promise<string | undefined>;
   onMessage: (message: Record<string, unknown>) => void;
   onPresence?: (members: PresenceMember[]) => void;
 };
@@ -23,6 +25,8 @@ function configuredRealtime(): { websocketUrl: string; anonKey: string } | undef
   return { websocketUrl, anonKey };
 }
 
+export function hasSupabaseRealtimeConfig(): boolean { return configuredRealtime() !== undefined; }
+
 function memberList(payload: Record<string, unknown> | undefined): PresenceMember[] {
   const state = payload?.["presence-state"];
   if (!state || typeof state !== "object") return [];
@@ -35,20 +39,26 @@ function memberList(payload: Record<string, unknown> | undefined): PresenceMembe
 
 export function connectSupabaseRoomRealtime(options: SupabaseRealtimeOptions): { close: () => void } | undefined {
   const config = configuredRealtime();
-  if (!config || typeof WebSocket === "undefined") return undefined;
+  if (!config || !options.accessToken || typeof WebSocket === "undefined") return undefined;
   const topic = `realtime:room-${options.roomId}`;
   const socket = new WebSocket(config.websocketUrl);
   let ref = 0;
   let joined = false;
   let heartbeat: number | undefined;
+  let tokenRefresh: number | undefined;
   const send = (event: string, payload: Record<string, unknown>, targetTopic = topic) => {
     if (socket.readyState !== WebSocket.OPEN) return;
     ref += 1;
     socket.send(JSON.stringify({ topic: targetTopic, event, payload, ref: String(ref), join_ref: "1" }));
   };
   socket.addEventListener("open", () => {
-    send("phx_join", { config: { broadcast: { ack: false, self: false }, presence: { enabled: true }, private: false } });
+    send("phx_join", { config: { broadcast: { ack: false, self: false }, presence: { enabled: true }, private: true }, access_token: options.accessToken });
     heartbeat = window.setInterval(() => send("heartbeat", {}, "phoenix"), 25_000);
+    if (options.refreshAccessToken) {
+      tokenRefresh = window.setInterval(() => {
+        void options.refreshAccessToken?.().then((accessToken) => { if (accessToken) send("access_token", { access_token: accessToken }); }).catch(() => undefined);
+      }, 240_000);
+    }
   });
   socket.addEventListener("message", (event) => {
     try {
@@ -70,6 +80,6 @@ export function connectSupabaseRoomRealtime(options: SupabaseRealtimeOptions): {
       // SSE remains the authoritative fallback when the optional Realtime channel is unavailable.
     }
   });
-  const close = () => { if (heartbeat !== undefined) window.clearInterval(heartbeat); socket.close(); };
+  const close = () => { if (heartbeat !== undefined) window.clearInterval(heartbeat); if (tokenRefresh !== undefined) window.clearInterval(tokenRefresh); socket.close(); };
   return { close };
 }

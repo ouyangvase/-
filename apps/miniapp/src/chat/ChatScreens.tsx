@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DemoState } from "@project12/contracts";
 import { createTranslator, type Locale } from "@project12/i18n";
 import { hapticImpact, hapticSelection } from "@project12/telegram/bridge";
-import { connectSupabaseRoomRealtime } from "./supabase-realtime";
+import { connectSupabaseRoomRealtime, hasSupabaseRealtimeConfig } from "./supabase-realtime";
 
 export type ChatMessage = {
   id: string;
@@ -198,6 +199,14 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onCommand,
   const headers: Record<string, string> = sessionToken ? { "x-session-token": sessionToken } : {};
   const hint = state.round.state === "BANKER_BIDDING" ? "抢庄阶段 · 发送数字或“抢庄 600”" : state.round.state === "BETTING" ? "下注阶段 · 发送数字或 sh 金额" : state.round.state === "WAITING_BANKER_CONFIRM" ? "等待庄家 · 当前庄家发送任意文字确认" : state.round.state === "CLAIMING" ? "红包阶段 · 参与者发送“抢红包”" : "普通聊天和游戏消息都在这里发送";
   const pinnedMessages = messages.filter((message) => message.payload?.pinned === true).slice(-4).reverse();
+  const virtualOffset = hasOlderMessages ? 2 : 1;
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length + virtualOffset,
+    getScrollElement: () => viewportRef.current,
+    estimateSize: (index) => index === 0 && hasOlderMessages ? 52 : index < virtualOffset ? 100 : 92,
+    getItemKey: (index) => index === 0 && hasOlderMessages ? "older-messages" : index === (hasOlderMessages ? 1 : 0) ? "stage-banner" : messages[index - virtualOffset]?.id ?? index,
+    overscan: 8
+  });
 
   const scrollToLatest = (behavior: ScrollBehavior = "auto") => { const viewport = viewportRef.current; if (!viewport) return; viewport.scrollTo({ top: viewport.scrollHeight, behavior }); followRef.current = true; setAtBottom(true); setUnreadCount(0); };
   const markRead = () => { const latest = messages[messages.length - 1]; if (!latest) return; void fetch(`${apiUrl}/api/chat/rooms/room-12/read`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", "idempotency-key": `chat-read-${latest.id}`, ...headers }, body: JSON.stringify({ lastMessageId: latest.id }) }).catch(() => undefined); };
@@ -210,17 +219,35 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onCommand,
   }, [apiUrl, sessionToken]);
 
   useEffect(() => {
-    const realtime = connectSupabaseRoomRealtime({
-      roomId: "room-12",
-      userId: state.user.id,
-      displayName: state.user.displayName,
-      onMessage: (message) => {
-        const payload = message as unknown as ChatMessage;
-        setMessages((current) => current.some((item) => item.id === payload.id) ? current : [...current, payload].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
-      }
-    });
-    return () => realtime?.close();
-  }, [state.user.id, state.user.displayName]);
+    let disposed = false;
+    let realtime: { close: () => void } | undefined;
+    const controller = new AbortController();
+    const connect = async () => {
+      if (!hasSupabaseRealtimeConfig()) return;
+      const response = await fetch(`${apiUrl}/api/realtime/token`, { credentials: "include", headers, signal: controller.signal });
+      if (!response.ok) return;
+      const payload = await response.json() as { token?: string };
+      if (disposed || !payload.token) return;
+      realtime = connectSupabaseRoomRealtime({
+        roomId: "room-12",
+        userId: state.user.id,
+        displayName: state.user.displayName,
+        accessToken: payload.token,
+        refreshAccessToken: async () => {
+          const refreshResponse = await fetch(`${apiUrl}/api/realtime/token`, { credentials: "include", headers, signal: controller.signal });
+          if (!refreshResponse.ok) return undefined;
+          const refreshPayload = await refreshResponse.json() as { token?: string };
+          return refreshPayload.token;
+        },
+        onMessage: (message) => {
+          const next = message as unknown as ChatMessage;
+          setMessages((current) => current.some((item) => item.id === next.id) ? current : [...current, next].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+        }
+      });
+    };
+    void connect().catch(() => undefined);
+    return () => { disposed = true; controller.abort(); realtime?.close(); };
+  }, [apiUrl, sessionToken, state.user.id, state.user.displayName]);
 
   useEffect(() => {
     let stopped = false;
@@ -332,10 +359,17 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onCommand,
     <header className="chat-room-header-v2"><span className="chat-room-header-side" /><div><h1>十二牛牛游戏群 <span className="chat-room-count">2</span> <span className="chat-verified" aria-label="已验证"><ChatIcon name="verified" /></span></h1></div><button type="button" className="chat-room-more" aria-label="更多" onClick={() => setActivityOpen(true)}><ChatIcon name="more" /></button></header>
     <button className="chat-pinned-bar" type="button" onClick={() => setPinnedOpen(true)}><ChatIcon name="pin" /><span><strong>置顶消息（4）</strong><small>{previewText(pinnedMessages[0])}</small></span><ChatIcon name="chevron" /></button>
     <div className="chat-message-viewport" ref={viewportRef} onScroll={handleScroll}>
-      <div className="chat-message-list-v2">
-        {hasOlderMessages && <button className="chat-load-older" type="button" disabled={loadingOlderMessages} onClick={() => void loadOlderMessages()}>{loadingOlderMessages ? "正在加载…" : "查看更早消息"}</button>}
-        <StageBanner state={state} />
-        {messages.map((message) => <MessageGroup key={message.id} message={message} state={state} locale={locale} formatMessage={formatMessage} />)}
+      <div className="chat-message-list-v2" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const isOlderButton = hasOlderMessages && virtualRow.index === 0;
+          const isStage = virtualRow.index === (hasOlderMessages ? 1 : 0);
+          const message = !isOlderButton && !isStage ? messages[virtualRow.index - virtualOffset] : undefined;
+          return <div key={virtualRow.key} ref={rowVirtualizer.measureElement} data-index={virtualRow.index} className="chat-virtual-row" style={{ transform: `translateY(${virtualRow.start}px)` }}>
+            {isOlderButton && <button className="chat-load-older" type="button" disabled={loadingOlderMessages} onClick={() => void loadOlderMessages()}>{loadingOlderMessages ? "正在加载…" : "查看更早消息"}</button>}
+            {isStage && <StageBanner state={state} />}
+            {message && <MessageGroup message={message} state={state} locale={locale} formatMessage={formatMessage} />}
+          </div>;
+        })}
       </div>
     </div>
     {!atBottom && <button className="chat-scroll-latest" type="button" aria-label="回到最新消息" onClick={() => { scrollToLatest("smooth"); markRead(); }}><ChatIcon name="down" />{unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>}
