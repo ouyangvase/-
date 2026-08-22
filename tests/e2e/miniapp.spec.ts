@@ -39,10 +39,10 @@ test("player can open the internal chat and account surfaces", async ({ page }) 
   }
   await page.getByRole("textbox", { name: "我的聊天" }).fill("抢庄 600");
   await page.getByRole("textbox", { name: "我的聊天" }).press("Enter");
-  await expect(page.locator(".room-message-user").last()).toContainText("抢庄 600");
+  await expect(page.locator(".room-message-user").filter({ hasText: "抢庄 600" }).last()).toContainText("抢庄 600");
   await page.getByRole("textbox", { name: "我的聊天" }).fill("大家好，等这一局开始。");
   await page.getByRole("textbox", { name: "我的聊天" }).press("Enter");
-  await expect(page.locator(".room-message-user").last()).toContainText("大家好，等这一局开始。");
+  await expect(page.locator(".room-message-user").filter({ hasText: "大家好，等这一局开始。" }).last()).toContainText("大家好，等这一局开始。");
   await expect(page.locator(".chat-command-row")).toHaveCount(0);
   await page.getByRole("button", { name: "返回" }).click();
   await page.getByRole("button", { name: "钱包", exact: true }).click();

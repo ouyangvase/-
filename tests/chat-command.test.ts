@@ -82,7 +82,7 @@ describe("internal chat game commands", () => {
     const blockedConfirm = await command(bankerSession, "确认发红包", "chat-command-bettor-confirm");
     expect(blockedConfirm.status).toBe(400);
     expect((await blockedConfirm.json()).error).toContain("庄家");
-    const confirm = await command(bettorSession, "确认发包", "chat-command-confirm");
+    const confirm = await command(bettorSession, "开始吧，发红包", "chat-command-confirm-any-text");
     expect(confirm.status).toBe(200);
     expect((await confirm.json()).result.result.state).toBe("CLAIMING");
     const canonicalRound = await request("/api/rounds/R-0247", { headers: bankerSession });
@@ -92,9 +92,10 @@ describe("internal chat game commands", () => {
     expect(roomRealtimeSnapshot.status).toBe(200);
     expect(roomRealtimeSnapshot.headers.get("content-type")).toContain("text/event-stream");
     const room = await request("/api/chat/rooms/room-12/messages", { headers: bankerSession });
-    const roomBody = await room.json() as { messages: Array<{ body: string }> };
+    const roomBody = await room.json() as { messages: Array<{ body: string; type?: string }> };
     expect(roomBody.messages.some((message) => message.body === "下注 5")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "大家好，等这一局开始。" && message.type === "USER")).toBe(true);
+    expect(roomBody.messages.some((message) => message.body === "开始吧，发红包" && message.type === "USER")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "18")).toBe(false);
     expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
     const bankerRoom = await request("/api/chat/rooms/room-12/messages", { headers: bettorSession });

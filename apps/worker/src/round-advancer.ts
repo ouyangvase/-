@@ -72,7 +72,7 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       : current.state === "BETTING"
         ? {
             templateKey: "game.betting.closed",
-            body: "✅ 平台通知：下注结束，请庄家发送「确认发包」开始发红包。旁观者不会收到领取入口。",
+            body: "✅ 平台通知：下注结束，请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。",
             payload: { roundId: current.id, state: next, automated: true }
           }
         : null;
