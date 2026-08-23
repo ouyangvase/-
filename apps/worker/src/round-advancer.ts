@@ -48,7 +48,18 @@ async function insertInternalChatMessage(client: QueryExecutor, roundId: string,
 
 export function formatBettingSummary(entries: Array<{ displayName: string; amount: number }>): string {
   if (entries.length === 0) return "✅ 下注结束\n本局没有收到有效下注。";
-  return `✅ 下注结束\n\n本局下注成功名单（${entries.length}）：\n${entries.map((entry) => `@${entry.displayName} ${entry.amount}`).join("\n")}`;
+  return `✅ 下注结束\n\n本局下注成功名单（${entries.length}）：\n${entries.map((entry) => `${chatMention(entry.displayName)} ${entry.amount}`).join("\n")}`;
+}
+
+export function chatMention(displayName: string): string {
+  const normalized = displayName.trim().replace(/^@+/, "");
+  return normalized ? `@${normalized}` : "玩家";
+}
+
+export function formatBankerBettingOpened(displayName: string | null | undefined, amount: number | null | undefined): string {
+  const bankerLabel = displayName?.trim() ? chatMention(displayName) : "最高庄金玩家";
+  const bankerAmount = typeof amount === "number" && Number.isFinite(amount) ? amount : 0;
+  return `平台通知：${bankerLabel} 抢庄 ${bankerAmount} PT，当前进入下注阶段。`;
 }
 
 export function formatBettingInstructions(): string {
@@ -435,13 +446,18 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
     if (current.state === "SETTLING" && !(await canCompleteSettlement(client, current.id))) return false;
     let bankerUserId: string | null = null;
     let bankerAmount: number | null = null;
+    let bankerDisplayName: string | null = null;
     if (current.state === "BANKER_BIDDING") {
-      const bids = await client.query<{ user_id: string; amount: string | number }>(`SELECT user_id, amount FROM banker_bids
-        WHERE round_id = $1 ORDER BY amount DESC, created_at ASC, id ASC LIMIT 1`, [current.id]);
+      const bids = await client.query<{ user_id: string; amount: string | number; display_name: string }>(`SELECT bb.user_id, bb.amount,
+        COALESCE(ti.username, u.display_name, bb.user_id::text) AS display_name
+        FROM banker_bids bb JOIN users u ON u.id = bb.user_id
+        LEFT JOIN telegram_identities ti ON ti.user_id = bb.user_id
+        WHERE bb.round_id = $1 ORDER BY bb.amount DESC, bb.created_at ASC, bb.id ASC LIMIT 1`, [current.id]);
       const winner = bids.rows[0];
       if (!winner) return false;
       bankerUserId = winner.user_id;
       bankerAmount = Number(winner.amount);
+      bankerDisplayName = winner.display_name?.trim() || null;
       await captureBankerBids(client, current.id, bankerUserId);
     }
     const endsAt = nextEndsAt(next);
@@ -454,8 +470,8 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
     const roomNotice = current.state === "BANKER_BIDDING"
       ? {
           templateKey: "game.betting.opened",
-          body: "平台通知：抢庄结束，最高庄金玩家已成为庄家，下注阶段开始。",
-          payload: { roundId: current.id, state: next, stageKey: "BETTING_STARTED", stageAsset: "/game/start-betting.jpg", bankerUserId, bankerAmount, automated: true }
+          body: formatBankerBettingOpened(bankerDisplayName, bankerAmount),
+          payload: { roundId: current.id, state: next, stageKey: "BETTING_STARTED", stageAsset: "/game/start-betting.jpg", bankerUserId, bankerDisplayName, bankerAmount, automated: true }
         }
       : current.state === "BETTING"
         ? {
