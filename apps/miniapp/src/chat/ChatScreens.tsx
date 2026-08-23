@@ -259,11 +259,12 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
   useEffect(() => {
     let disposed = false;
     setConnection("connecting");
-    void fetch(`${apiUrl}/api/chat/rooms/room-12/messages`, { credentials: "include", headers, cache: "no-store" }).then((response) => response.ok ? response.json() as Promise<{ messages?: ChatMessage[]; hasMore?: boolean; nextCursor?: string; latestCursor?: string }> : undefined).then((payload) => { if (disposed || !payload) return; const loaded = payload.messages ?? []; setMessages((current) => mergeChatMessages(current, loaded)); setNextCursor(payload.nextCursor); latestMessageSeqRef.current = loaded[loaded.length - 1]?.messageSeq; setHasOlderMessages(Boolean(payload.hasMore)); window.requestAnimationFrame(() => scrollToLatest()); }).catch(() => undefined);
+    void fetch(`${apiUrl}/api/chat/rooms/room-12/messages`, { credentials: "include", headers, cache: "no-store" }).then((response) => response.ok ? response.json() as Promise<{ messages?: ChatMessage[]; hasMore?: boolean; nextCursor?: string; latestCursor?: string; state?: DemoState["round"]["state"]; roundId?: string; banker?: string; bankPool?: number }> : undefined).then((payload) => { if (disposed || !payload) return; const loaded = payload.messages ?? []; setMessages((current) => mergeChatMessages(current, loaded)); setNextCursor(payload.nextCursor); latestMessageSeqRef.current = loaded[loaded.length - 1]?.messageSeq; setHasOlderMessages(Boolean(payload.hasMore)); onCommand("SNAPSHOT", payload); setConnection("connected"); window.requestAnimationFrame(() => scrollToLatest()); }).catch(() => setConnection("offline"));
     return () => { disposed = true; };
   }, [apiUrl, sessionToken]);
 
   useEffect(() => {
+    if (import.meta.env.PROD) return undefined;
     let disposed = false;
     let realtime: { close: () => void } | undefined;
     const controller = new AbortController();
@@ -354,8 +355,10 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
       try {
         const response = await fetch(`${apiUrl}/api/chat/rooms/room-12/messages${query}`, { credentials: "include", headers, cache: "no-store" });
         if (!response.ok || disposed) return;
-        const payload = await response.json() as { messages?: ChatMessage[]; hasMore?: boolean; latestCursor?: string };
+        const payload = await response.json() as { messages?: ChatMessage[]; hasMore?: boolean; latestCursor?: string; state?: DemoState["round"]["state"]; roundId?: string; banker?: string; bankPool?: number };
         const incoming = payload.messages ?? [];
+        onCommand("SNAPSHOT", payload);
+        setConnection("connected");
         if (incoming.length > 0) {
           setMessages((current) => mergeChatMessages(current, incoming));
           latestMessageSeqRef.current = incoming[incoming.length - 1]?.messageSeq ?? latestMessageSeqRef.current;
