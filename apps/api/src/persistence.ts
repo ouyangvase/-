@@ -82,6 +82,8 @@ export class ApiPersistence implements PacketStore {
 
   get configured(): boolean { return this.database.configured; }
 
+  get databaseClient(): Project12Database { return this.database; }
+
   get roundDatabaseId(): string { return this.currentRoundId; }
 
   private databaseRoundId(roundId?: string): string {

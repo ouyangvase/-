@@ -11,6 +11,7 @@ import { createPacketProvider, PacketProviderError } from "./providers/packet-pr
 import { ApiPersistence, type RoomMessage, type VerificationSnapshot } from "./persistence.js";
 import { hashPin, validPin } from "./runtime-security.js";
 import { maskTngAccount } from "./verification-security.js";
+import { advanceExpiredRounds } from "../../worker/src/round-advancer.js";
 
 const port = Number(process.env.API_PORT ?? 8787);
 const appMode = process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
@@ -28,7 +29,8 @@ const requiredProductionConfig = [
   "SESSION_SECRET",
   "ADMIN_SESSION_SECRET",
   "DEVICE_TOKEN_SECRET",
-  "INTERNAL_WORKER_SECRET"
+  "INTERNAL_WORKER_SECRET",
+  "CRON_SECRET"
 ] as const;
 function missingProductionConfig(): string[] { return appMode === "demo" ? [] : requiredProductionConfig.filter((name) => !process.env[name]?.trim()); }
 const sessions = new Map<string, { userId: string; role: "PLAYER" | "ADMIN"; expiresAt: number }>();
@@ -288,9 +290,9 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   roundEvents.unshift(event);
   queueOutbox("ROUND_STATE_CHANGED", { ...event });
   audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload });
-  if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", stageKey: "BETTING_STARTED", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
-  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注已结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
-  if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", stageKey: "PACKET_SENT", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
+  if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", stageKey: "BETTING_STARTED", stageAsset: "/game/start-betting.jpg", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
+  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注已结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", stageAsset: "/game/stop-betting.jpg", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
+  if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", stageKey: "PACKET_SENT", stageAsset: "/game/start-packet.jpg", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
   if (to === "EVALUATING" && typeof payload.claimedAt === "string") {
     await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，抢包结束，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
     await addRoomMessage("ROUND", "⏳ 红包领取结束，系统正在计算牌型、比较庄家并生成成绩榜。", { templateKey: "game.results.calculating", calculation: true, roundId: state.round.id }, undefined, "PUBLIC_ROOM");
@@ -797,6 +799,18 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "POST" && !allowRateLimit(request)) return json(response, 429, { error: "Rate limit exceeded" });
     const healthPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
     if (request.method === "GET" && healthPath === "/version") return json(response, 200, { version: appVersion, buildId, deployedAt });
+    if (request.method === "GET" && healthPath === "/internal/round-advancer") {
+      const authorization = header(request, "authorization") ?? "";
+      const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+      const acceptedTokens = [process.env.CRON_SECRET, process.env.INTERNAL_WORKER_SECRET].filter((value): value is string => Boolean(value?.trim()));
+      if (!token || !acceptedTokens.some((accepted) => safeEqualText(token, accepted))) return json(response, 401, { code: "INTERNAL_WORKER_UNAUTHORIZED", error: "Internal scheduler authorization is required" });
+      if (appMode === "demo") return json(response, 409, { code: "DEMO_AUTOMATION_DISABLED", error: "The production round advancer is unavailable in demo mode" });
+      if (!persistence.configured) return json(response, 503, { code: "DATABASE_REQUIRED", error: "Persistent round storage is not configured" });
+      if (!process.env.PROJECT12_SERVER_SEED?.trim()) return json(response, 503, { code: "SERVER_SEED_REQUIRED", error: "Production server seed is not configured" });
+      const workerId = `vercel-cron-${buildId.slice(0, 12)}`;
+      const advanced = await advanceExpiredRounds(persistence.databaseClient, workerId, 20);
+      return json(response, 200, { ok: true, mode: appMode, workerId, advanced });
+    }
     const activeSession = await resolveSession(request);
     const runtime = persistence.configured && activeSession ? createRequestRuntime() : fallbackRuntime;
     if (!healthPath.startsWith("/health")) await hydrateRuntime(runtime);

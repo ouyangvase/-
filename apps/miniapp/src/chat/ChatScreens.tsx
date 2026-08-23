@@ -131,12 +131,14 @@ function SystemBubble({ message, text, locale }: { message: ChatMessage; text: s
 
 function StageAnnouncement({ message, locale }: { message: ChatMessage; locale: Locale }) {
   const stageKey = typeof message.payload?.stageKey === "string" ? message.payload.stageKey : "ROUND";
-  const stageAsset = ({
+  const defaultStageAsset = ({
     BETTING_STARTED: "/game/start-betting.jpg",
     BETTING_STOPPED: "/game/stop-betting.jpg",
     PACKET_SENT: "/game/start-packet.jpg",
     CLAIMS_ENDED: "/game/stop-packet.jpg"
   } as Record<string, string | undefined>)[stageKey];
+  const requestedStageAsset = typeof message.payload?.stageAsset === "string" ? message.payload.stageAsset : undefined;
+  const stageAsset = requestedStageAsset && requestedStageAsset.startsWith("/game/") ? requestedStageAsset : defaultStageAsset;
   const copy: { title: string; label: string } = ({
     BETTING_STARTED: { title: "开始下注", label: "下注 2–17 · 梭哈 sh10–sh177" },
     BETTING_STOPPED: { title: "停止下注", label: "下注已封盘，等待庄家确认发包" },

@@ -333,13 +333,13 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       ? {
           templateKey: "game.betting.opened",
           body: "平台通知：抢庄结束，最高庄金玩家已成为庄家，下注阶段开始。",
-          payload: { roundId: current.id, state: next, stageKey: "BETTING_STARTED", bankerUserId, bankerAmount, automated: true }
+          payload: { roundId: current.id, state: next, stageKey: "BETTING_STARTED", stageAsset: "/game/start-betting.jpg", bankerUserId, bankerAmount, automated: true }
         }
       : current.state === "BETTING"
         ? {
             templateKey: "game.betting.closed",
             body: "✅ 平台通知：下注结束，请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。",
-            payload: { roundId: current.id, state: next, stageKey: "BETTING_STOPPED", automated: true }
+            payload: { roundId: current.id, state: next, stageKey: "BETTING_STOPPED", stageAsset: "/game/stop-betting.jpg", automated: true }
           }
         : null;
     if (roomNotice) {
