@@ -1,0 +1,39 @@
+{
+  "verifiedAt": "2026-08-23T10:22:24.000Z",
+  "project": {
+    "name": "project-12-demo-staging-public",
+    "projectId": "prj_Sg31vMbgKRiyjfrkN1uWWWjykxDD",
+    "teamId": "team_DXbOF5VvrqAEkSiA0wUTIwf4"
+  },
+  "stableMiniAppUrl": "https://project-12-demo-staging-public.vercel.app",
+  "productionDeployment": {
+    "id": "dpl_AiBANCPGRohHtc1WVNnQ6CgsGxhx",
+    "url": "https://project-12-demo-staging-public-80ntsa13q-tomupros-projects.vercel.app",
+    "target": "production",
+    "status": "READY",
+    "commit": "ff7813b1960c2430f117b215ed65a935a0e346e7"
+  },
+  "checks": {
+    "rootHttpStatus": 200,
+    "healthHttpStatus": 200,
+    "versionHttpStatus": 200,
+    "apiCacheControl": "no-store, no-cache, must-revalidate",
+    "assetCacheControl": "public, max-age=31536000, immutable",
+    "version": "0.1.0-demo",
+    "buildId": "ff7813b1960c2430f117b215ed65a935a0e346e7"
+  },
+  "runtimeTruth": {
+    "mode": "demo",
+    "telegramMockEnabled": true,
+    "realMoneyDisabled": true,
+    "bot": "blocked",
+    "database": "disabled",
+    "worker": "mock"
+  },
+  "telegramEvidence": {
+    "botFatherConfigured": false,
+    "realSignedInitDataVerified": false,
+    "screenshots": []
+  },
+  "notes": "Deployment and stable alias are verified. BotFather setup, production bot token, Supabase persistence, Worker heartbeat, and real Telegram signed-initData evidence remain owner-controlled external gates. No token is stored here."
+}
