@@ -410,7 +410,7 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       if (messageId) await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["INTERNAL_CHAT_MESSAGE", JSON.stringify({ messageId, messageSeq: Number(message.rows[0].message_seq), roundId: current.id, type: "ROUND", body: roomNotice.body, payload: roomNotice.payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() })]);
     }
     if (current.state === "BANKER_BIDDING") {
-      await insertInternalChatMessage(client, current.id, formatBettingInstructions(), { templateKey: "game.betting.instructions", stageKey: "BETTING_STARTED", automated: true, bankerUserId, bankerAmount });
+      await insertInternalChatMessage(client, current.id, formatBettingInstructions(), { templateKey: "game.betting.instructions", automated: true, bankerUserId, bankerAmount });
     }
     if (current.state === "BETTING") {
       const bettors = await client.query<{ display_name: string; amount: string | number }>(`SELECT COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
