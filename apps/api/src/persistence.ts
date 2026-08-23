@@ -466,16 +466,17 @@ export class ApiPersistence implements PacketStore {
 
   async loadRoundRuntime(): Promise<RoundRuntimeSnapshot | undefined> {
     if (!this.configured) return undefined;
-    const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_user_id?: string; banker_pool: string | number }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, r.banker_user_id,
+    const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_telegram_user_id?: string; banker_pool: string | number }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, banker_ti.telegram_user_id AS banker_telegram_user_id,
       COALESCE((SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL'), 0) AS banker_pool
       FROM game_rooms gr JOIN rounds r ON r.id = gr.active_round_id
+      LEFT JOIN telegram_identities banker_ti ON banker_ti.user_id = r.banker_user_id
       WHERE gr.status = 'OPEN'
       ORDER BY r.state_started_at DESC
       LIMIT 1`);
     const row = rows[0];
     if (!row) return undefined;
     this.currentRoundId = row.round_id;
-    return { roundId: row.round_id, state: row.state, ...(row.state_ends_at ? { stateEndsAt: iso(row.state_ends_at) } : {}), bankerUserId: row.banker_user_id, bankerPool: Number(row.banker_pool) };
+    return { roundId: row.round_id, state: row.state, ...(row.state_ends_at ? { stateEndsAt: iso(row.state_ends_at) } : {}), bankerUserId: row.banker_telegram_user_id, bankerPool: Number(row.banker_pool) };
   }
 
   async persistDevice(telegramUserId: string, publicKey: string): Promise<void> {
@@ -494,8 +495,11 @@ export class ApiPersistence implements PacketStore {
 
   async loadRoundResults(roundId?: string): Promise<PersistedRoundResult[]> {
     if (!this.configured) return [];
-    const rows = await this.database.query<{ user_id: string; bet_amount: string | number; packet_value: string | number; hand_type: string; hand_points: number; outcome?: PersistedRoundResult["outcome"]; multiplier: string | number; gross_reward: string | number; fee: string | number; net_reward: string | number; banker_pool_before: string | number; banker_pool_after: string | number }>(`SELECT user_id::text AS user_id, bet_amount, packet_value, hand_type, hand_points, outcome, multiplier, gross_reward, fee, net_reward, banker_pool_before, banker_pool_after
-      FROM round_results WHERE round_id = $1 ORDER BY created_at, id`, [this.databaseRoundId(roundId)]);
+    const rows = await this.database.query<{ user_id: string; bet_amount: string | number; packet_value: string | number; hand_type: string; hand_points: number; outcome?: PersistedRoundResult["outcome"]; multiplier: string | number; gross_reward: string | number; fee: string | number; net_reward: string | number; banker_pool_before: string | number; banker_pool_after: string | number }>(`SELECT COALESCE(ti.telegram_user_id, u.display_name, rr.user_id::text) AS user_id, rr.bet_amount, rr.packet_value, rr.hand_type, rr.hand_points, rr.outcome, rr.multiplier, rr.gross_reward, rr.fee, rr.net_reward, rr.banker_pool_before, rr.banker_pool_after
+      FROM round_results rr
+      LEFT JOIN telegram_identities ti ON ti.user_id = rr.user_id
+      LEFT JOIN users u ON u.id = rr.user_id
+      WHERE rr.round_id = $1 ORDER BY rr.created_at, rr.id`, [this.databaseRoundId(roundId)]);
     return rows.map((row) => ({
       userId: row.user_id,
       betAmount: Number(row.bet_amount),

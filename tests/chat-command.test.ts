@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { apiHandler } from "../apps/api/src/server";
+import { advanceDemoRoundNow, apiHandler } from "../apps/api/src/server";
 
 let server: Server;
 let baseUrl = "";
@@ -111,5 +111,24 @@ describe("internal chat game commands", () => {
     const claim = await command(bankerSession, "抢红包", "chat-command-claim");
     expect(claim.status).toBe(200);
     expect((await claim.json()).result.command).toBe("CLAIM_PACKET");
+
+    const numericClaim = await command(numericBettorSession, "抢红包", "chat-command-numeric-claim");
+    expect(numericClaim.status).toBe(200);
+    expect((await numericClaim.json()).result.result.state).toBe("CLAIMING");
+    const shoveClaim = await command(shoveBettorSession, "抢红包", "chat-command-shove-claim");
+    expect(shoveClaim.status).toBe(200);
+    expect((await shoveClaim.json()).result.result.state).toBe("EVALUATING");
+
+    const completedRoom = await request("/api/chat/rooms/room-12/messages", { headers: bankerSession });
+    const completedRoomBody = await completedRoom.json() as { messages: Array<{ body: string; payload?: { stageKey?: string } }> };
+    expect(completedRoomBody.messages.some((message) => message.payload?.stageKey === "CLAIMS_ENDED")).toBe(true);
+    expect(completedRoomBody.messages.some((message) => message.body.includes("本局成绩已公布"))).toBe(true);
+
+    await advanceDemoRoundNow();
+    const settledRound = await request("/api/rooms/room-12", { headers: bankerSession });
+    expect((await settledRound.json()).state).toBe("ROUND_COMPLETE");
+    await advanceDemoRoundNow();
+    const nextRound = await request("/api/rooms/room-12", { headers: bankerSession });
+    expect((await nextRound.json()).state).toBe("BANKER_BIDDING");
   });
 });
