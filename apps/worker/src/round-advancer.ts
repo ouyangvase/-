@@ -6,6 +6,19 @@ type DueRound = { id: string; state: RoundState; state_version: number; state_en
 type InternalPacketRow = { id: string; total_amount: string | number; max_claims: string | number; claimed_amount: string | number; claimed_count: string | number };
 type RefundParticipant = { user_id: string; bet_amount: string | number };
 type SettlementLine = { account: "USER_LOCKED" | "BANKER_POOL" | "USER_AVAILABLE" | "PLATFORM_FEE"; direction: "DEBIT" | "CREDIT"; amount: number; reason: string };
+type PublicSettlementResult = {
+  userId: string;
+  betAmount: number;
+  packetValue: number;
+  hand: { type: string; points: number };
+  outcome: string;
+  multiplier: number;
+  grossReward: number;
+  fee: number;
+  netReward: number;
+  bankerPoolBefore: number;
+  bankerPoolAfter: number;
+};
 
 const appMode = process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const configuredServerSeed = process.env.PROJECT12_SERVER_SEED ?? (appMode === "demo" ? "project12-demo-seed-247" : "");
@@ -20,16 +33,44 @@ function nextStateEnd(state: RoundState): Date | null {
   return seconds === undefined ? null : new Date(Date.now() + seconds * 1000);
 }
 
-async function insertInternalChatMessage(client: QueryExecutor, roundId: string, body: string, payload: Record<string, unknown>): Promise<void> {
+async function insertInternalChatMessage(client: QueryExecutor, roundId: string, body: string, payload: Record<string, unknown>, messageType = "ROUND"): Promise<void> {
   const message = await client.query<{ id: string; message_seq: number; created_at: string | Date }>(`INSERT INTO room_messages (room_id, round_id, message_type, visibility, template_key, body, payload)
-    SELECT room_id, id, 'ROUND', 'PUBLIC_ROOM', $2, $3, $4::jsonb FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [roundId, payload.templateKey ?? null, body, JSON.stringify(payload)]);
+    SELECT room_id, id, $2, 'PUBLIC_ROOM', $3, $4, $5::jsonb FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [roundId, messageType, payload.templateKey ?? null, body, JSON.stringify(payload)]);
   const messageId = message.rows[0]?.id;
   if (!messageId) return;
-  const event = { messageId, messageSeq: Number(message.rows[0].message_seq), roundId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() };
+  const event = { messageId, messageSeq: Number(message.rows[0].message_seq), roundId, type: messageType, body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() };
   await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('INTERNAL_CHAT_MESSAGE', $1::jsonb)", [JSON.stringify(event)]);
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
-  if (supabaseUrl && serviceKey) void fetch(`${supabaseUrl}/realtime/v1/api/broadcast?private=true`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-12", event: "message", payload: { message: { id: messageId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date().toISOString() } } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
+  if (supabaseUrl && serviceKey) void fetch(`${supabaseUrl}/realtime/v1/api/broadcast?private=true`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-12", event: "message", payload: { message: { id: messageId, type: messageType, body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date().toISOString() } } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+export function formatBettingSummary(entries: Array<{ displayName: string; amount: number }>): string {
+  if (entries.length === 0) return "✅ 下注结束\n本局没有收到有效下注。";
+  return `✅ 下注结束\n\n本局下注成功名单（${entries.length}）：\n${entries.map((entry) => `@${entry.displayName} ${entry.amount}`).join("\n")}`;
+}
+
+export function toPublicSettlementResult(input: {
+  displayName: string;
+  betAmount: number;
+  packetValue: number;
+  hand: { type: string; points: number };
+  settlement: { outcome: string; multiplier: number; grossReward: number; fee: number; netReward: number; bankerPoolAfter: number };
+  bankerPoolBefore: number;
+}): PublicSettlementResult {
+  return {
+    userId: input.displayName,
+    betAmount: input.betAmount,
+    packetValue: input.packetValue,
+    hand: input.hand,
+    outcome: input.settlement.outcome,
+    multiplier: input.settlement.multiplier,
+    grossReward: input.settlement.grossReward,
+    fee: input.settlement.fee,
+    netReward: input.settlement.netReward,
+    bankerPoolBefore: input.bankerPoolBefore,
+    bankerPoolAfter: input.settlement.bankerPoolAfter
+  };
 }
 
 async function insertStateEvent(client: QueryExecutor, roundId: string, from: RoundState, to: RoundState, stateVersion: number, workerId: string, payload: Record<string, unknown>): Promise<void> {
@@ -76,6 +117,7 @@ async function autoClaimExpiredRound(database: Project12Database, row: DueRound,
     const payload = { automated: true, reason: "packet claim deadline elapsed", packetId: packet.id, claimedCount, maxClaims, seedHash: hashSeed(seed) };
     await insertStateEvent(client, row.id, "CLAIMING", "EVALUATING", Number(updated.rows[0].state_version), workerId, payload);
     await insertInternalChatMessage(client, row.id, "⌛ 红包领取时间结束，系统已为未领取的本局参与者自动开包，正在算牌。", { templateKey: "game.packet.expired", stageKey: "CLAIMS_ENDED", stageAsset: "/game/stop-packet.jpg", ...payload });
+    await insertInternalChatMessage(client, row.id, "📊 抢包结束，系统正在统算结果，请耐心等待公布成绩榜……", { templateKey: "game.results.calculating", ...payload });
     return true;
   });
 }
@@ -242,7 +284,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
       await createNextRound(client, row.id, workerId);
       return true;
     }
-    const results: string[] = [];
+    const results: PublicSettlementResult[] = [];
     const settling = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'SETTLING', state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = 'EVALUATING' AND state_version = $2 RETURNING state_version`, [row.id, row.state_version]);
     if (!settling.rows[0]) return false;
@@ -265,7 +307,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
         row.id, player.user_id, betAmount, packetValue, hand.type, hand.points, JSON.stringify(packet.digits.slice(-3)), settlement.result.outcome,
         settlement.result.multiplier, settlement.result.grossReward, settlement.result.fee, settlement.result.netReward, bankerPoolBefore, settlement.result.bankerPoolAfter
       ]);
-      results.push(`${player.display_name} · ${hand.type} ${hand.points}点 · ${settlement.result.outcome} · ${betAmount} PT`);
+      results.push(toPublicSettlementResult({ displayName: player.display_name, betAmount, packetValue, hand, settlement: settlement.result, bankerPoolBefore }));
     }
     await client.query(`INSERT INTO banker_pools (round_id, amount) VALUES ($1, $2)
       ON CONFLICT (round_id) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now()`, [row.id, bankerPool]);
@@ -274,7 +316,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     if (!completed.rows[0]) return false;
     const payload = { automated: true, reason: "settlement posted", bankerUserId: current.banker_user_id, bankerHand, bankerPoolAfter: bankerPool, seedHash: hashSeed(workerServerSeed()), results };
     await insertStateEvent(client, row.id, "SETTLING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
-    await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}\n${results.join("\\n")}`, { templateKey: "game.results.published", ...payload, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits });
+    await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}`, { templateKey: "game.results.published", ...payload, banker: current.banker_user_id, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits }, "RESULTS");
     await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
     await createNextRound(client, row.id, workerId);
     return true;
@@ -321,7 +363,7 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
   return database.transaction(async (client) => {
     const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS acquired", [row.id]);
     if (!lock.rows[0]?.acquired) return false;
-    const currentRows = await client.query<DueRound>("SELECT id, state, state_version, state_ends_at FROM rounds WHERE id = $1 FOR UPDATE", [row.id]);
+    const currentRows = await client.query<DueRound>("SELECT id, state, state_version, state_ends_at, banker_user_id FROM rounds WHERE id = $1 FOR UPDATE", [row.id]);
     const current = currentRows.rows[0];
     if (!current || current.state !== row.state || Number(current.state_version) !== Number(row.state_version) || !current.state_ends_at || new Date(current.state_ends_at).getTime() > Date.now()) return false;
     if (current.state === "SETTLING" && !(await canCompleteSettlement(client, current.id))) return false;
@@ -342,6 +384,16 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       WHERE id = $1 AND state = $4 AND state_version = $5 AND state_ends_at <= now() RETURNING id, state_version`, [current.id, next, endsAt, current.state, current.state_version, bankerUserId]);
     if (!updated.rows[0]) return false;
     await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [current.id, current.state, next, JSON.stringify(payload), `worker:${workerId}`]);
+    if (current.state === "BETTING") {
+      const bettors = await client.query<{ display_name: string; amount: string | number }>(`SELECT COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
+        COALESCE(rp.bet_amount, 0) AS amount
+        FROM round_participants rp JOIN users u ON u.id = rp.user_id
+        LEFT JOIN telegram_identities ti ON ti.user_id = rp.user_id
+        WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status = 'ELIGIBLE'
+        ORDER BY rp.joined_at, rp.id`, [current.id]);
+      const entries = bettors.rows.map((bettor) => ({ displayName: bettor.display_name, amount: Number(bettor.amount) }));
+      await insertInternalChatMessage(client, current.id, formatBettingSummary(entries), { templateKey: "game.betting.summary", automated: true, successfulBets: entries.map((entry) => ({ userId: entry.displayName, amount: entry.amount })) }, "BANKER");
+    }
     const roomNotice = current.state === "BANKER_BIDDING"
       ? {
           templateKey: "game.betting.opened",

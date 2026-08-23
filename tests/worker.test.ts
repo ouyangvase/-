@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advanceDemoRound, claimUnpublishedOutbox, withAdvisoryLock } from "../apps/worker/src/worker";
-import { hasValidBankerBid, nextTimedState } from "../apps/worker/src/round-advancer";
+import { formatBettingSummary, hasValidBankerBid, nextTimedState, toPublicSettlementResult } from "../apps/worker/src/round-advancer";
 
 describe("Worker runtime primitives", () => {
   it("claims each in-memory outbox event once", () => {
@@ -29,5 +29,21 @@ describe("Worker runtime primitives", () => {
   it("keeps an expired banker phase alive when a valid bid exists", () => {
     expect(hasValidBankerBid(0)).toBe(false);
     expect(hasValidBankerBid("400")).toBe(true);
+  });
+
+  it("formats the automatic betting close as a real chat event", () => {
+    expect(formatBettingSummary([{ displayName: "player-one", amount: 5 }, { displayName: "player-two", amount: 10 }])).toContain("本局下注成功名单（2）");
+    expect(formatBettingSummary([{ displayName: "player-one", amount: 5 }])).toContain("@player-one 5");
+  });
+
+  it("keeps automatic settlement results structured for the chat scoreboard", () => {
+    expect(toPublicSettlementResult({
+      displayName: "player-one",
+      betAmount: 5,
+      packetValue: 22,
+      hand: { type: "普通点数", points: 4 },
+      bankerPoolBefore: 100,
+      settlement: { outcome: "WIN", multiplier: 4, grossReward: 20, fee: 1, netReward: 19, bankerPoolAfter: 80 }
+    })).toMatchObject({ userId: "player-one", betAmount: 5, packetValue: 22, outcome: "WIN", netReward: 19 });
   });
 });
