@@ -563,9 +563,9 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
   let results: RoundResultRow[] | undefined;
   if (allClaimed && state.round.state === "CLAIMING") {
     await transition("EVALUATING", identity.userId, { claimSequence: claim.claimSequence, claimedAt: claim.claimedAt, idempotencyKey: key });
-    results = await publishRoundResults(state.round.id, packetId, bettorRows, claims.map((item) => ({ userId: item.userId, value: item.value })));
+    if (appMode === "demo") results = await publishRoundResults(state.round.id, packetId, bettorRows, claims.map((item) => ({ userId: item.userId, value: item.value })));
   }
-  state.round.endsAt = allClaimed ? "Done" : "00:15";
+  state.round.endsAt = allClaimed ? (appMode === "demo" ? "Done" : "00:10") : "00:15";
   const bankerRound = demoRoundHand(serverSeed, state.round.id);
   const hand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
   audit(identity.userId, "INTERNAL_PACKET_CLAIMED", "ROUND", state.round.id, undefined, { ...claim, allClaimed, claimedCount: claims.length });
