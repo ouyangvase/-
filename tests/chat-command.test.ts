@@ -92,12 +92,15 @@ describe("internal chat game commands", () => {
     expect(roomRealtimeSnapshot.status).toBe(200);
     expect(roomRealtimeSnapshot.headers.get("content-type")).toContain("text/event-stream");
     const room = await request("/api/chat/rooms/room-12/messages", { headers: bankerSession });
-    const roomBody = await room.json() as { messages: Array<{ body: string; type?: string }> };
+    const roomBody = await room.json() as { messages: Array<{ body: string; type?: string; payload?: { stageKey?: string; stageAsset?: string } }> };
     expect(roomBody.messages.some((message) => message.body === "下注 5")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "大家好，等这一局开始。" && message.type === "USER")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "开始吧，发红包" && message.type === "USER")).toBe(true);
     expect(roomBody.messages.some((message) => message.body === "18")).toBe(false);
     expect(roomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(true);
+    expect(roomBody.messages.some((message) => message.payload?.stageKey === "BETTING_STARTED" && message.payload.stageAsset === "/game/start-betting.jpg")).toBe(true);
+    expect(roomBody.messages.some((message) => message.payload?.stageKey === "BETTING_STOPPED" && message.payload.stageAsset === "/game/stop-betting.jpg")).toBe(true);
+    expect(roomBody.messages.some((message) => message.payload?.stageKey === "PACKET_SENT" && message.payload.stageAsset === "/game/start-packet.jpg")).toBe(true);
     const bankerRoom = await request("/api/chat/rooms/room-12/messages", { headers: bettorSession });
     const bankerRoomBody = await bankerRoom.json() as { messages: Array<{ body: string }> };
     expect(bankerRoomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(false);
@@ -120,8 +123,8 @@ describe("internal chat game commands", () => {
     expect((await shoveClaim.json()).result.result.state).toBe("EVALUATING");
 
     const completedRoom = await request("/api/chat/rooms/room-12/messages", { headers: bankerSession });
-    const completedRoomBody = await completedRoom.json() as { messages: Array<{ body: string; payload?: { stageKey?: string } }> };
-    expect(completedRoomBody.messages.some((message) => message.payload?.stageKey === "CLAIMS_ENDED")).toBe(true);
+    const completedRoomBody = await completedRoom.json() as { messages: Array<{ body: string; payload?: { stageKey?: string; stageAsset?: string } }> };
+    expect(completedRoomBody.messages.some((message) => message.payload?.stageKey === "CLAIMS_ENDED" && message.payload.stageAsset === "/game/stop-packet.jpg")).toBe(true);
     expect(completedRoomBody.messages.some((message) => message.body.includes("本局成绩已公布"))).toBe(true);
 
     await advanceDemoRoundNow();
