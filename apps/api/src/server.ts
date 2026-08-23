@@ -400,6 +400,7 @@ async function executeBid(identity: { userId: string }, key: string, amount: num
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("Bid must be a positive integer");
   if (state.round.state !== "BANKER_BIDDING") throw new Error("Banker bidding is closed");
   await persistence.persistBankerBid(identity.userId, amount, state.round.id);
+  if (persistence.configured) await hydrateUserRuntime(identity.userId);
   const bids = bankerBids.get(state.round.id) ?? [];
   const bid = { userId: identity.userId, amount, serverReceivedAt: now() };
   bankerBids.set(state.round.id, [...bids.filter((item) => item.userId !== identity.userId), bid]);
@@ -422,6 +423,7 @@ async function executeCloseBankerBidding(identity: { userId: string }, key: stri
   state.round.banker = winner.userId;
   if (winner.userId === state.user.id) state.user.role = "BANKER";
   await persistence.persistRoundBanker(winner.userId, state.round.id);
+  if (persistence.configured) await hydrateUserRuntime(identity.userId);
   await transition("BETTING", identity.userId, { amount: winner.amount, currentHighest: winner.amount, banker: winner.userId, idempotencyKey: key, biddingClosed: true, bidAcceptedAt: winner.serverReceivedAt });
   audit(identity.userId, "BANKER_BIDDING_CLOSED", "ROUND", state.round.id, undefined, { banker: winner.userId, amount: winner.amount, bidCount: bids.length, idempotencyKey: key });
   return { state: state.round.state, banker: winner.userId, amount: winner.amount, currentHighest: winner.amount, biddingClosed: true, bidCount: bids.length };

@@ -83,6 +83,42 @@ function packetRecord(row: PacketRow, roundId: string): PacketRecord {
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type WalletAccountType = "USER_AVAILABLE" | "USER_LOCKED_BANKER_POOL" | "BANKER_POOL";
+
+async function transferWalletBalance(input: {
+  client: QueryExecutor;
+  referenceType: string;
+  referenceId: string;
+  idempotencyKey: string;
+  reason: string;
+  from: { accountType: WalletAccountType; userId?: string };
+  to: { accountType: WalletAccountType; userId?: string };
+  amount: number;
+}): Promise<void> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) throw new Error("Banker amount must be a positive integer");
+  const journal = await input.client.query<{ id: string }>(`INSERT INTO ledger_journals
+    (reference_type, reference_id, idempotency_key, reason, created_by)
+    VALUES ($1, $2, $3, $4, 'api') ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
+  [input.referenceType, input.referenceId, input.idempotencyKey, input.reason]);
+  if (!journal.rows[0]) return;
+  const accounts = await input.client.query<{ id: string; account_type: WalletAccountType }>(`SELECT id, account_type
+    FROM wallet_accounts
+    WHERE account_type = $1 AND ((user_id = $2::uuid) OR (user_id IS NULL AND $2::uuid IS NULL))
+    FOR UPDATE`, [input.from.accountType, input.from.userId ?? null]);
+  const fromId = accounts.rows[0]?.id;
+  if (!fromId) throw new Error(`Missing wallet account ${input.from.accountType}`);
+  const target = await input.client.query<{ id: string }>(`SELECT id FROM wallet_accounts
+    WHERE account_type = $1 AND ((user_id = $2::uuid) OR (user_id IS NULL AND $2::uuid IS NULL))
+    FOR UPDATE`, [input.to.accountType, input.to.userId ?? null]);
+  const toId = target.rows[0]?.id;
+  if (!toId) throw new Error(`Missing wallet account ${input.to.accountType}`);
+  await input.client.query(`INSERT INTO ledger_lines (journal_id, account_id, direction, amount)
+    VALUES ($1, $2, 'DEBIT', $3), ($1, $4, 'CREDIT', $3)`, [journal.rows[0].id, fromId, input.amount, toId]);
+  const debited = await input.client.query("UPDATE wallet_accounts SET balance = balance - $2 WHERE id = $1 AND balance >= $2 RETURNING id", [fromId, input.amount]);
+  if (!debited.rows[0]) throw new Error(`Insufficient wallet balance in ${input.from.accountType}`);
+  await input.client.query("UPDATE wallet_accounts SET balance = balance + $2 WHERE id = $1", [toId, input.amount]);
+}
+
 export class ApiPersistence implements PacketStore {
   private readonly database: Project12Database;
   private readonly strict: boolean;
@@ -518,10 +554,21 @@ export class ApiPersistence implements PacketStore {
   async persistBankerBid(telegramUserId: string, amount: number, roundId?: string): Promise<void> {
     const databaseRoundId = this.databaseRoundId(roundId);
     await this.run(() => this.database.transaction(async (client) => {
-      await client.query("INSERT INTO banker_bids (round_id, user_id, amount) SELECT $1, ti.user_id, $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [databaseRoundId, telegramUserId, amount]);
+      const identity = await client.query<{ user_id: string }>("SELECT user_id::text FROM telegram_identities WHERE telegram_user_id = $1 FOR UPDATE", [telegramUserId]);
+      const userId = identity.rows[0]?.user_id;
+      if (!userId) throw new Error("TELEGRAM_IDENTITY_NOT_FOUND");
+      const previous = await client.query<{ amount: string | number }>("SELECT amount FROM banker_bids WHERE round_id = $1 AND user_id = $2::uuid FOR UPDATE", [databaseRoundId, userId]);
+      const previousAmount = Number(previous.rows[0]?.amount ?? 0);
+      const delta = amount - previousAmount;
+      if (delta > 0) {
+        await transferWalletBalance({ client, referenceType: "BANKER_BID_LOCK", referenceId: databaseRoundId, idempotencyKey: `banker-bid-lock:${databaseRoundId}:${userId}:${amount}`, reason: "Lock internal points for banker bid", from: { accountType: "USER_AVAILABLE", userId }, to: { accountType: "USER_LOCKED_BANKER_POOL", userId }, amount: delta });
+      } else if (delta < 0) {
+        await transferWalletBalance({ client, referenceType: "BANKER_BID_RELEASE", referenceId: databaseRoundId, idempotencyKey: `banker-bid-release:${databaseRoundId}:${userId}:${amount}`, reason: "Release reduced banker bid", from: { accountType: "USER_LOCKED_BANKER_POOL", userId }, to: { accountType: "USER_AVAILABLE", userId }, amount: Math.abs(delta) });
+      }
+      await client.query("INSERT INTO banker_bids (round_id, user_id, amount) VALUES ($1, $2, $3) ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [databaseRoundId, userId, amount]);
       await client.query(`INSERT INTO round_participants (round_id, user_id, role, status, bet_amount)
-        SELECT $1, ti.user_id, 'BANKER', 'ELIGIBLE', NULL FROM telegram_identities ti WHERE ti.telegram_user_id = $2
-        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'BANKER', status = 'ELIGIBLE'`, [databaseRoundId, telegramUserId]);
+        VALUES ($1, $2, 'BANKER', 'ELIGIBLE', NULL)
+        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'BANKER', status = 'ELIGIBLE'`, [databaseRoundId, userId]);
     }));
   }
 
@@ -533,8 +580,31 @@ export class ApiPersistence implements PacketStore {
     return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount), serverReceivedAt: new Date(row.created_at).toISOString() }));
   }
 
-  async persistRoundBanker(telegramUserId: string, roundId?: string): Promise<void> {
-    await this.run(() => this.database.query(`UPDATE rounds SET banker_user_id = (SELECT user_id FROM telegram_identities WHERE telegram_user_id = $2) WHERE id = $1`, [this.databaseRoundId(roundId), telegramUserId]).then(() => undefined));
+  async persistRoundBanker(telegramUserId: string, roundId?: string): Promise<number | undefined> {
+    const databaseRoundId = this.databaseRoundId(roundId);
+    return this.run(() => this.database.transaction(async (client) => {
+      const identity = await client.query<{ user_id: string }>("SELECT user_id::text FROM telegram_identities WHERE telegram_user_id = $1 FOR UPDATE", [telegramUserId]);
+      const requestedWinnerId = identity.rows[0]?.user_id;
+      if (!requestedWinnerId) throw new Error("TELEGRAM_IDENTITY_NOT_FOUND");
+      const bids = await client.query<{ user_id: string; amount: string | number }>(`SELECT user_id::text, amount FROM banker_bids
+        WHERE round_id = $1 ORDER BY amount DESC, created_at ASC, id ASC FOR UPDATE`, [databaseRoundId]);
+      const winner = bids.rows[0];
+      if (!winner) throw new Error("BANKER_BID_REQUIRED");
+      if (winner.user_id !== requestedWinnerId) throw new Error("BANKER_BID_CONFLICT");
+      for (const bid of bids.rows) {
+        const amount = Number(bid.amount);
+        if (bid.user_id === winner.user_id) {
+          await transferWalletBalance({ client, referenceType: "BANKER_POOL_CAPTURE", referenceId: databaseRoundId, idempotencyKey: `banker-pool-capture:${databaseRoundId}:${bid.user_id}`, reason: "Capture winning banker bid into banker pool", from: { accountType: "USER_LOCKED_BANKER_POOL", userId: bid.user_id }, to: { accountType: "BANKER_POOL" }, amount });
+        } else {
+          await transferWalletBalance({ client, referenceType: "BANKER_BID_REFUND", referenceId: databaseRoundId, idempotencyKey: `banker-bid-refund:${databaseRoundId}:${bid.user_id}`, reason: "Refund losing banker bid", from: { accountType: "USER_LOCKED_BANKER_POOL", userId: bid.user_id }, to: { accountType: "USER_AVAILABLE", userId: bid.user_id }, amount });
+          await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND user_id = $2::uuid AND role = 'BANKER'", [databaseRoundId, bid.user_id]);
+        }
+      }
+      await client.query(`INSERT INTO banker_pools (round_id, amount) VALUES ($1, $2)
+        ON CONFLICT (round_id) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now()`, [databaseRoundId, Number(winner.amount)]);
+      await client.query("UPDATE rounds SET banker_user_id = $2::uuid WHERE id = $1", [databaseRoundId, winner.user_id]);
+      return Number(winner.amount);
+    }));
   }
 
   async persistBet(telegramUserId: string, amount: number, roundId?: string): Promise<void> {

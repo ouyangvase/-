@@ -5,6 +5,7 @@ import { classifyPacket, demoPacketValue, demoRoundHand, hashSeed, settlePlayer 
 type DueRound = { id: string; state: RoundState; state_version: number; state_ends_at: string | Date | null; banker_user_id?: string | null };
 type InternalPacketRow = { id: string; total_amount: string | number; max_claims: string | number; claimed_amount: string | number; claimed_count: string | number };
 type RefundParticipant = { user_id: string; bet_amount: string | number };
+type BankerWalletAccount = "USER_AVAILABLE" | "USER_LOCKED_BANKER_POOL" | "BANKER_POOL";
 type SettlementLine = { account: "USER_LOCKED" | "BANKER_POOL" | "USER_AVAILABLE" | "PLATFORM_FEE"; direction: "DEBIT" | "CREDIT"; amount: number; reason: string };
 type PublicSettlementResult = {
   userId: string;
@@ -80,6 +81,66 @@ export function toPublicSettlementResult(input: {
 async function insertStateEvent(client: QueryExecutor, roundId: string, from: RoundState, to: RoundState, stateVersion: number, workerId: string, payload: Record<string, unknown>): Promise<void> {
   await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [roundId, from, to, JSON.stringify(payload), `worker:${workerId}`]);
   await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STATE_CHANGED', $1::jsonb)", [JSON.stringify({ roundId, from, to, stateVersion, actor: `worker:${workerId}`, ...payload })]);
+}
+
+async function transferBankerWallet(input: {
+  client: QueryExecutor;
+  referenceType: string;
+  referenceId: string;
+  idempotencyKey: string;
+  reason: string;
+  from: { accountType: BankerWalletAccount; userId?: string };
+  to: { accountType: BankerWalletAccount; userId?: string };
+  amount: number;
+}): Promise<void> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) throw new Error("Banker amount must be a positive integer");
+  const journal = await input.client.query<{ id: string }>(`INSERT INTO ledger_journals
+    (reference_type, reference_id, idempotency_key, reason, created_by)
+    VALUES ($1, $2, $3, $4, 'worker') ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
+  [input.referenceType, input.referenceId, input.idempotencyKey, input.reason]);
+  if (!journal.rows[0]) return;
+  const from = await input.client.query<{ id: string }>(`SELECT id FROM wallet_accounts
+    WHERE account_type = $1 AND ((user_id = $2::uuid) OR (user_id IS NULL AND $2::uuid IS NULL)) FOR UPDATE`, [input.from.accountType, input.from.userId ?? null]);
+  const fromId = from.rows[0]?.id;
+  if (!fromId) throw new Error(`Missing wallet account ${input.from.accountType}`);
+  const to = await input.client.query<{ id: string }>(`SELECT id FROM wallet_accounts
+    WHERE account_type = $1 AND ((user_id = $2::uuid) OR (user_id IS NULL AND $2::uuid IS NULL)) FOR UPDATE`, [input.to.accountType, input.to.userId ?? null]);
+  const toId = to.rows[0]?.id;
+  if (!toId) throw new Error(`Missing wallet account ${input.to.accountType}`);
+  await input.client.query(`INSERT INTO ledger_lines (journal_id, account_id, direction, amount)
+    VALUES ($1, $2, 'DEBIT', $3), ($1, $4, 'CREDIT', $3)`, [journal.rows[0].id, fromId, input.amount, toId]);
+  const debited = await input.client.query("UPDATE wallet_accounts SET balance = balance - $2 WHERE id = $1 AND balance >= $2 RETURNING id", [fromId, input.amount]);
+  if (!debited.rows[0]) throw new Error(`Insufficient wallet balance in ${input.from.accountType}`);
+  await input.client.query("UPDATE wallet_accounts SET balance = balance + $2 WHERE id = $1", [toId, input.amount]);
+}
+
+async function captureBankerBids(client: QueryExecutor, roundId: string, winnerUserId: string): Promise<number> {
+  const bids = await client.query<{ user_id: string; amount: string | number }>(`SELECT user_id::text, amount FROM banker_bids
+    WHERE round_id = $1 ORDER BY amount DESC, created_at ASC, id ASC FOR UPDATE`, [roundId]);
+  const winner = bids.rows[0];
+  if (!winner || winner.user_id !== winnerUserId) throw new Error("BANKER_BID_CONFLICT");
+  for (const bid of bids.rows) {
+    const amount = Number(bid.amount);
+    if (bid.user_id === winner.user_id) {
+      await transferBankerWallet({ client, referenceType: "BANKER_POOL_CAPTURE", referenceId: roundId, idempotencyKey: `banker-pool-capture:${roundId}:${bid.user_id}`, reason: "Capture winning banker bid into banker pool", from: { accountType: "USER_LOCKED_BANKER_POOL", userId: bid.user_id }, to: { accountType: "BANKER_POOL" }, amount });
+    } else {
+      await transferBankerWallet({ client, referenceType: "BANKER_BID_REFUND", referenceId: roundId, idempotencyKey: `banker-bid-refund:${roundId}:${bid.user_id}`, reason: "Refund losing banker bid", from: { accountType: "USER_LOCKED_BANKER_POOL", userId: bid.user_id }, to: { accountType: "USER_AVAILABLE", userId: bid.user_id }, amount });
+      await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND user_id = $2::uuid AND role = 'BANKER'", [roundId, bid.user_id]);
+    }
+  }
+  await client.query(`INSERT INTO banker_pools (round_id, amount) VALUES ($1, $2)
+    ON CONFLICT (round_id) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now()`, [roundId, Number(winner.amount)]);
+  return Number(winner.amount);
+}
+
+async function refundBankerPool(client: QueryExecutor, roundId: string, bankerUserId: string): Promise<void> {
+  const rows = await client.query<{ amount: string | number }>("SELECT amount FROM banker_pools WHERE round_id = $1 FOR UPDATE", [roundId]);
+  const amount = Number(rows.rows[0]?.amount ?? 0);
+  if (amount > 0) {
+    await transferBankerWallet({ client, referenceType: "BANKER_POOL_REFUND", referenceId: roundId, idempotencyKey: `banker-pool-refund:${roundId}`, reason: "Refund banker stake after round cancellation", from: { accountType: "BANKER_POOL" }, to: { accountType: "USER_AVAILABLE", userId: bankerUserId }, amount });
+    await client.query("UPDATE banker_pools SET amount = 0, updated_at = now() WHERE round_id = $1", [roundId]);
+  }
+  await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND user_id = $2::uuid AND role = 'BANKER'", [roundId, bankerUserId]);
 }
 
 async function autoClaimExpiredRound(database: Project12Database, row: DueRound, workerId: string): Promise<boolean> {
@@ -218,6 +279,7 @@ async function cancelExpiredRound(database: Project12Database, row: DueRound, wo
     if (!cancelled.rows[0]) return false;
     await insertStateEvent(client, row.id, current.state, "ROUND_CANCELLED", Number(cancelled.rows[0].state_version), workerId, { automated: true, reason, participantCount: participants.rows.length });
     if (emitStopNotice) await insertInternalChatMessage(client, row.id, current.state === "BANKER_BIDDING" ? "✅ 平台通知：抢庄时间结束，本局未收到有效庄金，系统正在取消本局并准备下一局。" : "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: current.state === "BANKER_BIDDING" ? "game.banker.expired" : "game.betting.closed", stageKey: current.state === "BANKER_BIDDING" ? "BANKER_BIDDING_EXPIRED" : "BETTING_STOPPED", ...(current.state === "BETTING" ? { stageAsset: "/game/stop-betting.jpg" } : {}), automated: true, reason: current.state === "BANKER_BIDDING" ? "no banker bids" : "no eligible bets" });
+    if (current.state === "WAITING_BANKER_CONFIRM" && current.banker_user_id) await refundBankerPool(client, row.id, current.banker_user_id);
     for (const participant of participants.rows) await refundRoundParticipant(client, row.id, participant);
     const refundStarted = await client.query<{ state_version: number }>(`UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = 'ROUND_CANCELLED' RETURNING state_version`, [row.id, participants.rows.length > 0 ? "REFUNDING" : "REFUNDED"]);
@@ -380,6 +442,7 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       if (!winner) return false;
       bankerUserId = winner.user_id;
       bankerAmount = Number(winner.amount);
+      await captureBankerBids(client, current.id, bankerUserId);
     }
     const endsAt = nextEndsAt(next);
     const payload = { actor: `worker:${workerId}`, reason: "state deadline elapsed", previousVersion: Number(current.state_version), ...(bankerUserId ? { bankerUserId, bankerAmount } : {}) };
