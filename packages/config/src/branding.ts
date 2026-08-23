@@ -5,7 +5,7 @@ export const branding = {
   botDisplayName: "PROJECT 12 娱乐城",
   botUsername: "project12_demo_bot",
   miniAppUrl: "http://localhost:4173",
-  version: "0.1.0-demo",
+  version: "0.1.0",
   mascotName: "Niu",
   supportUsername: "",
   announcementChannel: "",

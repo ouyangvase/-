@@ -16,7 +16,7 @@ const port = Number(process.env.API_PORT ?? 8787);
 const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const telegramMockEnabled = appMode === "demo" && process.env.TELEGRAM_MOCK_ENABLED !== "false";
 const realMoneyDisabled = process.env.REAL_MONEY_ENABLED !== "true";
-const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? process.env.APP_VERSION ?? "0.1.0-demo";
+const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? process.env.APP_VERSION ?? "0.1.0";
 const buildId = process.env.NEXT_PUBLIC_BUILD_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "local";
 const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT ?? new Date().toISOString();
 const persistence = new ApiPersistence();
