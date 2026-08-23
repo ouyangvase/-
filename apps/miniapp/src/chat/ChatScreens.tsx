@@ -195,6 +195,12 @@ function BankerSummary({ message, text, locale }: { message: ChatMessage; text: 
   return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>本局明细</small></span><div className="chat-structured-bubble chat-banker-summary"><strong>停止下注 · 发包明细</strong><div className="chat-summary-grid">{fields.map(([label, value]) => <span key={label}><small>{label}</small><b>{value}</b></span>)}</div>{bettors.length > 0 && <div className="chat-bettor-list"><small>本局下注成功名单（{bettors.length}）</small>{bettors.map((bettor, index) => <span key={`${String(bettor.userId ?? "player")}-${index}`}>{String(bettor.userId ?? "玩家")} · {String(bettor.amount ?? "—")}</span>)}</div>}<p className="chat-summary-source">{text.split("\n\n本局下注成功名单")[0]}</p><time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
 }
 
+function BettingSummary({ message, text, locale }: { message: ChatMessage; text: string; locale: Locale }) {
+  const bettors = Array.isArray(message.payload?.successfulBets) ? message.payload.successfulBets as Array<Record<string, unknown>> : [];
+  const summary = text.split("\n\n本局下注成功名单")[0] || "✅ 下注结束";
+  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>下注结果</small></span><div className="chat-structured-bubble chat-betting-summary"><strong>{summary}</strong><p>请庄家于 60 秒内在聊天室发送一条消息，确认开始发红包。<br />如需重开本局，可发送 /重推。</p>{bettors.length > 0 && <div className="chat-bettor-list"><small>本局下注成功名单（{bettors.length}）</small>{bettors.map((bettor, index) => <span key={`${String(bettor.userId ?? "player")}-${index}`}>{String(bettor.userId ?? "玩家")} · {String(bettor.amount ?? "—")} PT</span>)}</div>}<time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
+}
+
 function PlayerBubble({ message, own, text, locale }: { message: ChatMessage; own: boolean; text: string; locale: Locale }) {
   return <div className={`chat-message-row ${own ? "is-own" : ""}`}><span className="chat-avatar">{avatarLabel(message.actor)}</span><div className="chat-message-column"><span className="chat-message-author">{message.actor ?? "玩家"}</span><div className="chat-bubble"><p>{text}</p><time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
 }
@@ -206,6 +212,7 @@ function MessageGroup({ message, state, locale, formatMessage }: { message: Chat
     return <PacketMessage message={message} locale={locale} claimable={claimable} />;
   }
   if (message.type === "RESULTS") return <Scoreboard message={message} text={text} locale={locale} />;
+  if (message.type === "BANKER" && (message.templateKey === "game.betting.summary" || message.payload?.templateKey === "game.betting.summary")) return <BettingSummary message={message} text={text} locale={locale} />;
   if (message.type === "BANKER" && message.payload?.summary === true) return <BankerSummary message={message} text={text} locale={locale} />;
   if (typeof message.payload?.stageKey === "string") return <StageAnnouncement message={message} locale={locale} />;
   if (message.payload?.messageType === "IMAGE") return <ImageMessage message={message} own={isOwnMessage(message, state.user.displayName)} locale={locale} />;

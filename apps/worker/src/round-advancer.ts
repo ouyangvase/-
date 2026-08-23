@@ -384,16 +384,6 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       WHERE id = $1 AND state = $4 AND state_version = $5 AND state_ends_at <= now() RETURNING id, state_version`, [current.id, next, endsAt, current.state, current.state_version, bankerUserId]);
     if (!updated.rows[0]) return false;
     await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [current.id, current.state, next, JSON.stringify(payload), `worker:${workerId}`]);
-    if (current.state === "BETTING") {
-      const bettors = await client.query<{ display_name: string; amount: string | number }>(`SELECT COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
-        COALESCE(rp.bet_amount, 0) AS amount
-        FROM round_participants rp JOIN users u ON u.id = rp.user_id
-        LEFT JOIN telegram_identities ti ON ti.user_id = rp.user_id
-        WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status = 'ELIGIBLE'
-        ORDER BY rp.joined_at, rp.id`, [current.id]);
-      const entries = bettors.rows.map((bettor) => ({ displayName: bettor.display_name, amount: Number(bettor.amount) }));
-      await insertInternalChatMessage(client, current.id, formatBettingSummary(entries), { templateKey: "game.betting.summary", automated: true, successfulBets: entries.map((entry) => ({ userId: entry.displayName, amount: entry.amount })) }, "BANKER");
-    }
     const roomNotice = current.state === "BANKER_BIDDING"
       ? {
           templateKey: "game.betting.opened",
@@ -414,6 +404,16 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
         FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [current.id, roomNotice.templateKey, roomNotice.body, JSON.stringify(roomNotice.payload)]);
       const messageId = message.rows[0]?.id;
       if (messageId) await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["INTERNAL_CHAT_MESSAGE", JSON.stringify({ messageId, messageSeq: Number(message.rows[0].message_seq), roundId: current.id, type: "ROUND", body: roomNotice.body, payload: roomNotice.payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() })]);
+    }
+    if (current.state === "BETTING") {
+      const bettors = await client.query<{ display_name: string; amount: string | number }>(`SELECT COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
+        COALESCE(rp.bet_amount, 0) AS amount
+        FROM round_participants rp JOIN users u ON u.id = rp.user_id
+        LEFT JOIN telegram_identities ti ON ti.user_id = rp.user_id
+        WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status = 'ELIGIBLE'
+        ORDER BY rp.joined_at, rp.id`, [current.id]);
+      const entries = bettors.rows.map((bettor) => ({ displayName: bettor.display_name, amount: Number(bettor.amount) }));
+      await insertInternalChatMessage(client, current.id, formatBettingSummary(entries), { templateKey: "game.betting.summary", automated: true, successfulBets: entries.map((entry) => ({ userId: entry.displayName, amount: entry.amount })) }, "BANKER");
     }
     await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["ROUND_STATE_CHANGED", JSON.stringify({ roundId: current.id, from: current.state, to: next, stateVersion: updated.rows[0].state_version, ...payload })]);
     return true;

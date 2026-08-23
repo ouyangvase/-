@@ -297,6 +297,9 @@ body { overflow-x: hidden; background: #000; }
 .chat-score-row.outcome-watered .chat-score-result b, .chat-score-row.outcome-tie .chat-score-result b { color: #8dd9c1; }
 .chat-inline-link { min-height: 32px; margin-top: 8px; padding: 0; border: 0; color: #67a1ff; background: transparent; font-size: 12px; font-weight: 700; }
 .chat-banker-summary { border-color: rgba(86,143,225,.3); }
+.chat-betting-summary { border-color: rgba(240,200,117,.42); }
+.chat-betting-summary > strong { color: #f0c875; }
+.chat-betting-summary p { margin-top: 9px; }
 .chat-banker-summary p { margin-top: 8px; font-weight: 700; }
 .chat-banker-summary small { display: block; margin-top: 7px; color: rgba(241,239,232,.58); line-height: 1.45; }
 .chat-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); }
