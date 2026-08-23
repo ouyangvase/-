@@ -46,6 +46,16 @@ describe("API round flow", () => {
     expect((await request("/api/referral", { headers: session })).status).toBe(200);
     expect((await request("/api/referrals/tree", { headers: session })).status).toBe(200);
     expect((await request("/api/rewards/daily", { headers: session })).status).toBe(200);
+    const leaderboard = await request("/api/rooms/room-12/leaderboard?category=points", { headers: session });
+    expect(leaderboard.status).toBe(200);
+    expect((await leaderboard.json()).entries).toBeInstanceOf(Array);
+    const dailyRewards = await request("/api/rooms/room-12/rewards/daily", { headers: session });
+    expect(dailyRewards.status).toBe(200);
+    expect((await dailyRewards.json()).rewards).toBeInstanceOf(Array);
+    const adminHeaders = { "x-demo-admin-token": "admin-demo-only" };
+    expect((await request("/api/admin/overview", { headers: adminHeaders })).status).toBe(200);
+    expect((await request("/api/admin/jobs", { headers: adminHeaders })).status).toBe(200);
+    expect((await request("/api/admin/rules", { headers: adminHeaders })).status).toBe(200);
   });
 
   it("persists the user-visible round sequence through the API boundary", async () => {
@@ -127,7 +137,14 @@ describe("API round flow", () => {
     expect((await wallet.json()).locked).toBe(250);
     const chat = await request("/api/chat/room", { headers: session });
     expect(chat.status).toBe(200);
-    expect((await chat.json()).messages.some((message: { body: string }) => message.body.includes("下单 250 PT"))).toBe(true);
+    const chatBody = await chat.json() as { messages: Array<{ body: string; messageSeq?: number }>; latestCursor?: string; nextCursor?: string };
+    expect(chatBody.messages.some((message) => message.body.includes("下单 250 PT"))).toBe(true);
+    const chatSequences = chatBody.messages.map((message) => message.messageSeq ?? 0);
+    expect(chatSequences).toEqual([...chatSequences].sort((left, right) => left - right));
+    expect(Number(chatBody.latestCursor)).toBe(chatSequences.at(-1));
+    const replayedHistory = await request(`/api/chat/room?after=${encodeURIComponent(chatBody.latestCursor ?? "0")}`, { headers: session });
+    expect(replayedHistory.status).toBe(200);
+    expect((await replayedHistory.json()).messages).toHaveLength(0);
     const close = await write("/api/rounds/R-0247/close-betting", "api-flow-close-betting", {}, bankerSession);
     expect(close.status).toBe(200);
     expect((await close.json()).result.state).toBe("WAITING_BANKER_CONFIRM");

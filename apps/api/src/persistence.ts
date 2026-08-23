@@ -40,6 +40,7 @@ export type VerificationSnapshot = { status: VerificationStatus; submittedAt?: s
 export type VerificationCaseSnapshot = VerificationSnapshot & { telegramUserId: string; legalName?: string; tngAccountMasked?: string };
 export type RoomMessage = {
   id: string;
+  messageSeq?: number;
   type: string;
   body: string;
   actor?: string;
@@ -170,25 +171,31 @@ export class ApiPersistence implements PacketStore {
     return result;
   }
 
-  async persistRoomMessage(input: { roundId?: string; userId?: string; type: string; body: string; payload?: Record<string, unknown>; templateKey?: string; visibility?: RoomMessage["visibility"]; targetUserId?: string }): Promise<void> {
-    await this.run(() => this.database.query(`INSERT INTO room_messages (room_id, round_id, user_id, target_user_id, message_type, visibility, template_key, body, payload)
+  async persistRoomMessage(input: { roundId?: string; userId?: string; type: string; body: string; payload?: Record<string, unknown>; templateKey?: string; visibility?: RoomMessage["visibility"]; targetUserId?: string }): Promise<{ id: string; messageSeq: number; createdAt: string } | undefined> {
+    const rows = await this.run(() => this.database.query<{ id: string; message_seq: number; created_at: string | Date }>(`INSERT INTO room_messages (room_id, round_id, user_id, target_user_id, message_type, visibility, template_key, body, payload)
       SELECT r.room_id, r.id, sender_ti.user_id, target_ti.user_id, $2, $6, $8, $3, $4::jsonb
       FROM rounds r
       LEFT JOIN telegram_identities sender_ti ON sender_ti.telegram_user_id = $5
       LEFT JOIN telegram_identities target_ti ON target_ti.telegram_user_id = $7
-      WHERE r.id = $1`, [input.roundId ?? this.roundDatabaseId, input.type, input.body, JSON.stringify(input.payload ?? {}), input.userId ?? null, input.visibility ?? "PUBLIC_ROOM", input.targetUserId ?? null, input.templateKey ?? null]).then(() => undefined));
+      WHERE r.id = $1 RETURNING id::text, message_seq, created_at`, [input.roundId ?? this.roundDatabaseId, input.type, input.body, JSON.stringify(input.payload ?? {}), input.userId ?? null, input.visibility ?? "PUBLIC_ROOM", input.targetUserId ?? null, input.templateKey ?? null]));
+    const row = rows?.[0];
+    return row ? { id: row.id, messageSeq: Number(row.message_seq), createdAt: iso(row.created_at) } : undefined;
   }
 
-  async loadRoomMessages(roundId?: string, viewerTelegramUserId?: string, before?: string, limit = 50): Promise<RoomMessage[]> {
+  async loadRoomMessages(roundId?: string, viewerTelegramUserId?: string, before?: string, limit = 50, after?: string): Promise<RoomMessage[]> {
     if (!this.configured) return [];
     const safeLimit = Math.min(Math.max(Math.trunc(limit) || 50, 1), 50);
-    const rows = await this.database.query<{ id: string; message_type: string; template_key?: string | null; visibility?: RoomMessage["visibility"] | null; target_user_id?: string | null; body: string; display_name?: string | null; created_at: string | Date; payload: Record<string, unknown> }>(`SELECT rm.id::text AS id, rm.message_type, rm.template_key, COALESCE(rm.visibility, 'PUBLIC_ROOM') AS visibility,
+    const beforeIsSeq = before && /^\d+$/.test(before) ? before : null;
+    const afterIsSeq = after && /^\d+$/.test(after) ? after : null;
+    const beforeTimestamp = before && !beforeIsSeq ? before : null;
+    const rows = await this.database.query<{ id: string; message_seq: number; message_type: string; template_key?: string | null; visibility?: RoomMessage["visibility"] | null; target_user_id?: string | null; body: string; display_name?: string | null; created_at: string | Date; payload: Record<string, unknown> }>(`SELECT rm.id::text AS id, rm.message_seq, rm.message_type, rm.template_key, COALESCE(rm.visibility, 'PUBLIC_ROOM') AS visibility,
         rm.target_user_id::text AS target_user_id, rm.body, u.display_name, rm.created_at, rm.payload
       FROM room_messages rm
       LEFT JOIN users u ON u.id = rm.user_id
       LEFT JOIN telegram_identities target_ti ON target_ti.user_id = rm.target_user_id
       WHERE rm.round_id = $1
-        AND ($3::timestamptz IS NULL OR rm.created_at < $3::timestamptz)
+        AND (($3::bigint IS NULL AND $4::timestamptz IS NULL) OR ($3::bigint IS NOT NULL AND rm.message_seq < $3::bigint) OR ($4::timestamptz IS NOT NULL AND rm.created_at < $4::timestamptz))
+        AND ($5::bigint IS NULL OR rm.message_seq > $5::bigint)
         AND (
           COALESCE(rm.visibility, 'PUBLIC_ROOM') = 'PUBLIC_ROOM'
           OR (rm.visibility = 'TARGET_USER' AND target_ti.telegram_user_id = $2)
@@ -200,17 +207,17 @@ export class ApiPersistence implements PacketStore {
               AND participant_ti.telegram_user_id = $2
           ))
         )
-      ORDER BY rm.created_at DESC, rm.id DESC LIMIT ${safeLimit}`, [roundId ?? this.roundDatabaseId, viewerTelegramUserId ?? null, before ?? null]);
-    return rows.reverse().map((row) => ({ id: row.id, type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {}, ...(row.template_key ? { templateKey: row.template_key } : {}), visibility: row.visibility ?? "PUBLIC_ROOM", ...(row.target_user_id ? { targetUserId: row.target_user_id } : {}) }));
+      ORDER BY rm.message_seq DESC LIMIT ${safeLimit}`, [roundId ?? this.roundDatabaseId, viewerTelegramUserId ?? null, beforeIsSeq, beforeTimestamp, afterIsSeq]);
+    return rows.reverse().map((row) => ({ id: row.id, messageSeq: Number(row.message_seq), type: row.message_type, body: row.body, ...(row.display_name ? { actor: row.display_name } : {}), createdAt: iso(row.created_at), payload: row.payload ?? {}, ...(row.template_key ? { templateKey: row.template_key } : {}), visibility: row.visibility ?? "PUBLIC_ROOM", ...(row.target_user_id ? { targetUserId: row.target_user_id } : {}) }));
   }
 
-  async persistRoomRead(roundId: string | undefined, telegramUserId: string, lastMessageId?: string): Promise<void> {
+  async persistRoomRead(roundId: string | undefined, telegramUserId: string, lastMessageId?: string, lastMessageSeq?: number): Promise<void> {
     const messageId = lastMessageId && uuidPattern.test(lastMessageId) ? lastMessageId : null;
-    await this.run(() => this.database.query(`INSERT INTO chat_message_reads (room_id, user_id, last_read_message_id, updated_at)
-      SELECT r.room_id, ti.user_id, $3::uuid, now()
+    await this.run(() => this.database.query(`INSERT INTO chat_message_reads (room_id, user_id, last_read_message_id, last_read_message_seq, updated_at)
+      SELECT r.room_id, ti.user_id, $3::uuid, $4::bigint, now()
       FROM rounds r JOIN telegram_identities ti ON ti.telegram_user_id = $2
       WHERE r.id = $1
-      ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_message_id = EXCLUDED.last_read_message_id, updated_at = now()`, [this.databaseRoundId(roundId), telegramUserId, messageId]).then(() => undefined));
+      ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_message_id = COALESCE(EXCLUDED.last_read_message_id, chat_message_reads.last_read_message_id), last_read_message_seq = COALESCE(EXCLUDED.last_read_message_seq, chat_message_reads.last_read_message_seq), updated_at = now()`, [this.databaseRoundId(roundId), telegramUserId, messageId, Number.isFinite(lastMessageSeq) ? lastMessageSeq : null]).then(() => undefined));
   }
 
   async loadUserRuntime(telegramUserId: string): Promise<UserRuntimeSnapshot | undefined> {

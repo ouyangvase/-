@@ -2,6 +2,8 @@
 
 ## Current public staging
 
+- Latest implementation Previews (production aliases unchanged): Mini App/API `https://project-12-demo-staging-public-70ggc83xq-tomupros-projects.vercel.app` (`dpl_48MXEbuFm3qyyByURjUN25gs81E7`) and Admin `https://project-12-admin-staging-q686l2cwe-tomupros-projects.vercel.app` (`dpl_BdRT3ZQowDoHWapjJLeSpKRx3dmd`). Both returned READY; verify protected deployments with `vercel curl`.
+
 - Mini App and bundled API production alias: `https://project-12-demo-staging-public.vercel.app` (latest verified deployment `dpl_3ZQhoYH3SenFAtVXVWnGUBfzA7gN`). Root and `/api/health` return HTTP 200. The public runtime reports `mode: demo`, `packetProvider: DEMO_READY`, `realMoneyDisabled: true`, `bot: blocked`, `groupChat: blocked` and `database: disabled` until deployment credentials are added. The deployed Mini App now gates `/api/chat/room` and wallet reads behind identity verification and stores only encrypted verification values in persistent mode.
 - Admin production alias: `https://project-12-admin-staging.vercel.app` (latest verified deployment `dpl_9ApdYMWBqmFB1YBeedWsjeeqz7hk`). Root and `/admin/rounds` return HTTP 200; the production bundle does not embed the local demo admin token.
 - The public alias serves the mobile-first Mini App and the bundled API Function. The local test harness also covers the Telegram-runtime guard, so a Telegram container cannot silently continue when its API is unavailable.

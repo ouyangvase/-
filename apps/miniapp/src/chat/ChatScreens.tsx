@@ -7,6 +7,7 @@ import { connectSupabaseRoomRealtime, hasSupabaseRealtimeConfig } from "./supaba
 
 export type ChatMessage = {
   id: string;
+  messageSeq?: number;
   type: string;
   body: string;
   actor?: string;
@@ -64,6 +65,13 @@ function isSystemMessage(message: ChatMessage): boolean {
 
 function isOwnMessage(message: ChatMessage, displayName: string): boolean {
   return message.actor === "你" || message.actor === displayName;
+}
+
+function chatMessageKey(message: ChatMessage): string { return message.messageSeq != null ? `seq:${message.messageSeq}` : `id:${message.id}`; }
+function mergeChatMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const merged = new Map(current.map((message) => [chatMessageKey(message), message]));
+  for (const message of incoming) merged.set(chatMessageKey(message), message);
+  return [...merged.values()].sort((left, right) => (left.messageSeq ?? Number.MAX_SAFE_INTEGER) - (right.messageSeq ?? Number.MAX_SAFE_INTEGER) || new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
 }
 
 function avatarLabel(actor?: string): string {
@@ -168,21 +176,23 @@ function Sheet({ title, children, onClose, className = "" }: { title: string; ch
   return <div className="chat-sheet-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className={`chat-sheet ${className}`} role="dialog" aria-modal="true" aria-labelledby="chat-sheet-title"><div className="chat-sheet-handle" /><header><h2 id="chat-sheet-title">{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><ChatIcon name="close" /></button></header>{children}</section></div>;
 }
 
-function FloatingRoomShortcuts({ onOpen }: { onOpen: () => void }) {
-  return <div className="chat-floating-shortcuts"><button type="button" aria-label="排行榜" title="排行榜" onClick={onOpen}><ChatIcon name="activity" /></button><button type="button" aria-label="每日奖励" title="每日奖励" onClick={onOpen}><span>奖</span></button></div>;
+function FloatingRoomShortcuts({ onOpen }: { onOpen: (screen?: "leaderboard" | "rewards") => void }) {
+  return <div className="chat-floating-shortcuts"><button type="button" aria-label="排行榜" title="排行榜" onClick={() => onOpen("leaderboard")}><ChatIcon name="activity" /></button><button type="button" aria-label="每日奖励" title="每日奖励" onClick={() => onOpen("rewards")}><span>奖</span></button></div>;
 }
 
 function ChatComposer({ draft, setDraft, sending, connection, onSubmit, onEmoji, onPlus, error, hint }: { draft: string; setDraft: (value: string) => void; sending: boolean; connection: "connecting" | "connected" | "offline"; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onEmoji: () => void; onPlus: () => void; error: string; hint: string }) {
   return <form className="chat-composer-v2" data-game-input="chat-text-only" onSubmit={onSubmit}><div className="chat-stage-status"><ConnectionStatus status={connection} /><span>{hint}</span></div><div className="chat-composer-row"><button type="button" className="chat-composer-icon" aria-label="表情" onClick={onEmoji}><ChatIcon name="smile" /></button><div className="chat-composer-field"><input data-chat-command-input="true" name="chatMessage" type="text" inputMode="text" enterKeyHint="send" autoComplete="off" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="发送消息…" aria-label="我的聊天" /><button type="submit" aria-label="发送" disabled={sending || !draft.trim()}><ChatIcon name="send" /></button></div><button type="button" className="chat-composer-icon" aria-label="添加附件" onClick={onPlus}><ChatIcon name="plus" /></button></div>{error && <p className="chat-composer-error" role="alert">{error}</p>}</form>;
 }
 
-export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, onCommand, formatMessage }: { state: DemoState; apiUrl: string; sessionToken: string; locale: Locale; onBack: () => void; onCommand: (command: string, result: unknown) => void; formatMessage: (message: ChatMessage) => string }) {
+export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, onCommand, formatMessage, onNavigate }: { state: DemoState; apiUrl: string; sessionToken: string; locale: Locale; onBack: () => void; onCommand: (command: string, result: unknown) => void; formatMessage: (message: ChatMessage) => string; onNavigate?: (screen: "leaderboard" | "rewards") => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const firstLoadRef = useRef(true);
   const followRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const latestMessageSeqRef = useRef<number | undefined>(undefined);
+  const [nextCursor, setNextCursor] = useState<string>();
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [draft, setDraft] = useState("");
@@ -209,12 +219,12 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
   });
 
   const scrollToLatest = (behavior: ScrollBehavior = "auto") => { const viewport = viewportRef.current; if (!viewport) return; viewport.scrollTo({ top: viewport.scrollHeight, behavior }); followRef.current = true; setAtBottom(true); setUnreadCount(0); };
-  const markRead = () => { const latest = messages[messages.length - 1]; if (!latest) return; void fetch(`${apiUrl}/api/chat/rooms/room-12/read`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", "idempotency-key": `chat-read-${latest.id}`, ...headers }, body: JSON.stringify({ lastMessageId: latest.id }) }).catch(() => undefined); };
+  const markRead = () => { const latest = messages[messages.length - 1]; if (!latest) return; void fetch(`${apiUrl}/api/chat/rooms/room-12/read`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", "idempotency-key": `chat-read-${latest.messageSeq ?? latest.id}`, ...headers }, body: JSON.stringify({ lastMessageId: latest.id, lastMessageSeq: latest.messageSeq }) }).catch(() => undefined); };
 
   useEffect(() => {
     let disposed = false;
     setConnection("connecting");
-    void fetch(`${apiUrl}/api/chat/rooms/room-12/messages`, { credentials: "include", headers, cache: "no-store" }).then((response) => response.ok ? response.json() as Promise<{ messages?: ChatMessage[]; hasMore?: boolean }> : undefined).then((payload) => { if (disposed || !payload) return; setMessages(payload.messages ?? []); setHasOlderMessages(Boolean(payload.hasMore)); window.requestAnimationFrame(() => scrollToLatest()); }).catch(() => undefined);
+    void fetch(`${apiUrl}/api/chat/rooms/room-12/messages`, { credentials: "include", headers, cache: "no-store" }).then((response) => response.ok ? response.json() as Promise<{ messages?: ChatMessage[]; hasMore?: boolean; nextCursor?: string; latestCursor?: string }> : undefined).then((payload) => { if (disposed || !payload) return; const loaded = payload.messages ?? []; setMessages((current) => mergeChatMessages(current, loaded)); setNextCursor(payload.nextCursor); latestMessageSeqRef.current = loaded[loaded.length - 1]?.messageSeq; setHasOlderMessages(Boolean(payload.hasMore)); window.requestAnimationFrame(() => scrollToLatest()); }).catch(() => undefined);
     return () => { disposed = true; };
   }, [apiUrl, sessionToken]);
 
@@ -241,7 +251,8 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
         },
         onMessage: (message) => {
           const next = message as unknown as ChatMessage;
-          setMessages((current) => current.some((item) => item.id === next.id) ? current : [...current, next].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+          setMessages((current) => mergeChatMessages(current, [next]));
+          if (next.messageSeq != null) latestMessageSeqRef.current = Math.max(latestMessageSeqRef.current ?? 0, next.messageSeq);
         }
       });
     };
@@ -262,7 +273,8 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
         const payload = JSON.parse(data) as ChatMessage;
         if (eventName === "snapshot") { onCommand("SNAPSHOT", payload); return; }
         if (eventName !== "message") return;
-        setMessages((current) => current.some((item) => item.id === payload.id) ? current : [...current, payload].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+        setMessages((current) => mergeChatMessages(current, [payload]));
+        if (payload.messageSeq != null) latestMessageSeqRef.current = Math.max(latestMessageSeqRef.current ?? 0, payload.messageSeq);
         if (followRef.current) window.requestAnimationFrame(() => scrollToLatest()); else setUnreadCount((current) => current + 1);
       } catch { /* keep the existing message stream */ }
     };
@@ -299,6 +311,29 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
     return () => { stopped = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); controller?.abort(); };
   }, [apiUrl, sessionToken]);
 
+  useEffect(() => {
+    if (connection === "connected") return;
+    let disposed = false;
+    const poll = async () => {
+      const cursor = latestMessageSeqRef.current;
+      const query = cursor ? `?after=${encodeURIComponent(String(cursor))}` : "";
+      try {
+        const response = await fetch(`${apiUrl}/api/chat/rooms/room-12/messages${query}`, { credentials: "include", headers, cache: "no-store" });
+        if (!response.ok || disposed) return;
+        const payload = await response.json() as { messages?: ChatMessage[]; hasMore?: boolean; latestCursor?: string };
+        const incoming = payload.messages ?? [];
+        if (incoming.length > 0) {
+          setMessages((current) => mergeChatMessages(current, incoming));
+          latestMessageSeqRef.current = incoming[incoming.length - 1]?.messageSeq ?? latestMessageSeqRef.current;
+          if (followRef.current) window.requestAnimationFrame(() => scrollToLatest()); else setUnreadCount((current) => current + incoming.length);
+        }
+      } catch { /* retry on the next poll */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 3000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [apiUrl, sessionToken, connection]);
+
   useEffect(() => { if (!firstLoadRef.current || messages.length === 0) return; firstLoadRef.current = false; window.requestAnimationFrame(() => { scrollToLatest(); markRead(); }); }, [messages.length]);
 
   const handleScroll = () => {
@@ -319,11 +354,13 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
     loadingOlderRef.current = true; setLoadingOlderMessages(true);
     const oldHeight = viewport.scrollHeight; const oldTop = viewport.scrollTop;
     try {
-      const response = await fetch(`${apiUrl}/api/chat/rooms/room-12/messages?before=${encodeURIComponent(oldest.createdAt)}`, { credentials: "include", headers });
+      const cursor = nextCursor ?? (oldest.messageSeq != null ? String(oldest.messageSeq) : oldest.createdAt);
+      const response = await fetch(`${apiUrl}/api/chat/rooms/room-12/messages?before=${encodeURIComponent(cursor)}`, { credentials: "include", headers });
       if (!response.ok) throw new Error("历史消息加载失败");
-      const payload = await response.json() as { messages?: ChatMessage[]; hasMore?: boolean };
+      const payload = await response.json() as { messages?: ChatMessage[]; hasMore?: boolean; nextCursor?: string };
       const older = payload.messages ?? [];
-      setMessages((current) => [...older, ...current.filter((item) => !older.some((candidate) => candidate.id === item.id))]);
+      setMessages((current) => mergeChatMessages(current, older));
+      setNextCursor(payload.nextCursor);
       setHasOlderMessages(Boolean(payload.hasMore));
       window.requestAnimationFrame(() => { const currentViewport = viewportRef.current; if (currentViewport) currentViewport.scrollTop = oldTop + currentViewport.scrollHeight - oldHeight; });
     } catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "历史消息加载失败"); } finally { loadingOlderRef.current = false; setLoadingOlderMessages(false); }
@@ -339,8 +376,10 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
       if (!response.ok) throw new Error(payload.error ?? "消息发送失败");
       const historyResponse = await fetch(`${apiUrl}/api/chat/rooms/room-12/messages`, { credentials: "include", headers, cache: "no-store" });
       if (historyResponse.ok) {
-        const history = await historyResponse.json() as { messages?: ChatMessage[]; hasMore?: boolean };
-        setMessages(history.messages ?? []);
+        const history = await historyResponse.json() as { messages?: ChatMessage[]; hasMore?: boolean; nextCursor?: string; latestCursor?: string };
+        setMessages((current) => mergeChatMessages(current, history.messages ?? []));
+        latestMessageSeqRef.current = history.latestCursor ? Number(history.latestCursor) : latestMessageSeqRef.current;
+        setNextCursor(history.nextCursor);
         setHasOlderMessages(Boolean(history.hasMore));
       }
       setDraft(""); setPreview(undefined); onCommand(payload.result?.command ?? "MESSAGE", payload.result?.result); hapticImpact(); followRef.current = true; setAtBottom(true); window.requestAnimationFrame(() => scrollToLatest("smooth"));
@@ -373,13 +412,13 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
       </div>
     </div>
     {!atBottom && <button className="chat-scroll-latest" type="button" aria-label="回到最新消息" onClick={() => { scrollToLatest("smooth"); markRead(); }}><ChatIcon name="down" />{unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>}
-    <FloatingRoomShortcuts onOpen={() => setActivityOpen(true)} />
+    <FloatingRoomShortcuts onOpen={(screen) => { if (screen && onNavigate) onNavigate(screen); else setActivityOpen(true); }} />
     <ChatComposer draft={draft} setDraft={setDraft} sending={sending} connection={connection} onSubmit={onSubmit} onEmoji={() => setEmojiOpen(true)} onPlus={() => setAttachmentOpen(true)} error={error} hint={hint} />
     <input ref={fileRef} className="chat-hidden-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { onFile(event.target.files?.[0]); event.target.value = ""; }} />
     {emojiOpen && <Sheet title="选择表情" onClose={() => setEmojiOpen(false)} className="chat-emoji-sheet"><div className="chat-emoji-grid">{["😀", "😂", "😍", "😎", "👍", "👏", "🎉", "🔥", "💰", "🐮", "🤝", "🙏", "❤️", "✨", "😅", "🙌"].map((emoji) => <button type="button" key={emoji} onClick={() => { setDraft(`${draft}${emoji}`); setEmojiOpen(false); }}>{emoji}</button>)}</div></Sheet>}
     {attachmentOpen && <Sheet title="添加到聊天" onClose={() => setAttachmentOpen(false)} className="chat-attachment-sheet"><button type="button" onClick={() => fileRef.current?.click()}><ChatIcon name="image" /><span>照片</span><small>从相册选择</small></button><button type="button" onClick={() => fileRef.current?.click()}><ChatIcon name="camera" /><span>相机</span><small>拍摄照片</small></button><button type="button" className="chat-sheet-cancel" onClick={() => setAttachmentOpen(false)}>取消</button></Sheet>}
     {preview && <Sheet title="发送图片" onClose={() => setPreview(undefined)} className="chat-image-preview-sheet"><img src={preview.dataUrl} alt={preview.name} /><p>{preview.name} · {(preview.size / 1024).toFixed(0)} KB</p><div><button type="button" className="chat-secondary-action" onClick={() => setPreview(undefined)}>取消</button><button type="button" className="chat-primary-action" disabled={sending} onClick={() => void sendMessage("", preview)}>{sending ? "发送中…" : "发送"}</button></div></Sheet>}
     {pinnedOpen && <Sheet title="置顶消息（4）" onClose={() => setPinnedOpen(false)} className="chat-pinned-sheet"><div className="chat-pinned-list">{pinnedMessages.length > 0 ? pinnedMessages.map((message) => <button type="button" key={message.id} onClick={() => setPinnedOpen(false)}><span>{messageText(message, formatMessage)}</span><time>{timeLabel(message.createdAt, locale)}</time></button>) : <p>暂无置顶消息</p>}</div></Sheet>}
-    {activityOpen && <Sheet title="房间功能" onClose={() => setActivityOpen(false)} className="chat-activity-sheet"><button type="button" onClick={() => setActivityOpen(false)}><ChatIcon name="activity" /><span>排行榜</span><small>查看本局及累计排名</small></button><button type="button" onClick={() => setActivityOpen(false)}><span className="chat-reward-mark">奖</span><span>每日奖励</span><small>查看完成进度</small></button></Sheet>}
+    {activityOpen && <Sheet title="房间功能" onClose={() => setActivityOpen(false)} className="chat-activity-sheet"><button type="button" onClick={() => { setActivityOpen(false); onNavigate?.("leaderboard"); }}><ChatIcon name="activity" /><span>排行榜</span><small>查看本局及累计排名</small></button><button type="button" onClick={() => { setActivityOpen(false); onNavigate?.("rewards"); }}><span className="chat-reward-mark">奖</span><span>每日奖励</span><small>查看完成进度</small></button></Sheet>}
   </section>;
 }

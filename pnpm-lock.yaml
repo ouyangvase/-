@@ -47,6 +47,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
+      vite:
+        specifier: ^6.0.5
+        version: 6.4.3(@types/node@22.20.1)(tsx@4.23.12)
 
   apps/api:
     dependencies:

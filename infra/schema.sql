@@ -96,7 +96,31 @@ CREATE TABLE IF NOT EXISTS room_messages (
   user_id uuid REFERENCES users(id), target_user_id uuid REFERENCES users(id), message_type text NOT NULL,
   visibility text NOT NULL DEFAULT 'PUBLIC_ROOM' CHECK (visibility IN ('PUBLIC_ROOM', 'PARTICIPANTS_ONLY', 'TARGET_USER', 'ADMIN_ONLY')),
   template_key text, body text NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+  message_seq bigint NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS room_messages_room_message_seq_uq ON room_messages(room_id, message_seq);
+CREATE INDEX IF NOT EXISTS room_messages_room_seq_idx ON room_messages(room_id, message_seq DESC);
+CREATE OR REPLACE FUNCTION project12_assign_room_message_seq()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.message_seq IS NULL OR NEW.message_seq <= 0 THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended(NEW.room_id::text, 0));
+    SELECT COALESCE(MAX(message_seq), 0) + 1 INTO NEW.message_seq FROM room_messages WHERE room_id = NEW.room_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS room_messages_assign_message_seq ON room_messages;
+CREATE TRIGGER room_messages_assign_message_seq
+BEFORE INSERT ON room_messages
+FOR EACH ROW EXECUTE FUNCTION project12_assign_room_message_seq();
+CREATE TABLE IF NOT EXISTS chat_message_reads (
+  room_id uuid NOT NULL REFERENCES game_rooms(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_message_id uuid REFERENCES room_messages(id) ON DELETE SET NULL,
+  last_read_message_seq bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(room_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS banker_bids (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL REFERENCES rounds(id), user_id uuid NOT NULL REFERENCES users(id), amount bigint NOT NULL CHECK (amount > 0),

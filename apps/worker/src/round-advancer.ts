@@ -20,11 +20,11 @@ function nextStateEnd(state: RoundState): Date | null {
 }
 
 async function insertInternalChatMessage(client: QueryExecutor, roundId: string, body: string, payload: Record<string, unknown>): Promise<void> {
-  const message = await client.query<{ id: string }>(`INSERT INTO room_messages (room_id, round_id, message_type, visibility, template_key, body, payload)
-    SELECT room_id, id, 'ROUND', 'PUBLIC_ROOM', $2, $3, $4::jsonb FROM rounds WHERE id = $1 RETURNING id::text`, [roundId, payload.templateKey ?? null, body, JSON.stringify(payload)]);
+  const message = await client.query<{ id: string; message_seq: number; created_at: string | Date }>(`INSERT INTO room_messages (room_id, round_id, message_type, visibility, template_key, body, payload)
+    SELECT room_id, id, 'ROUND', 'PUBLIC_ROOM', $2, $3, $4::jsonb FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [roundId, payload.templateKey ?? null, body, JSON.stringify(payload)]);
   const messageId = message.rows[0]?.id;
   if (!messageId) return;
-  const event = { messageId, roundId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM" };
+  const event = { messageId, messageSeq: Number(message.rows[0].message_seq), roundId, type: "ROUND", body, payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() };
   await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('INTERNAL_CHAT_MESSAGE', $1::jsonb)", [JSON.stringify(event)]);
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
@@ -251,12 +251,12 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
           }
         : null;
     if (roomNotice) {
-      const message = await client.query<{ id: string }>(`INSERT INTO room_messages
+      const message = await client.query<{ id: string; message_seq: number; created_at: string | Date }>(`INSERT INTO room_messages
         (room_id, round_id, message_type, visibility, template_key, body, payload)
         SELECT room_id, id, 'ROUND', 'PUBLIC_ROOM', $2, $3, $4::jsonb
-        FROM rounds WHERE id = $1 RETURNING id::text`, [current.id, roomNotice.templateKey, roomNotice.body, JSON.stringify(roomNotice.payload)]);
+        FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [current.id, roomNotice.templateKey, roomNotice.body, JSON.stringify(roomNotice.payload)]);
       const messageId = message.rows[0]?.id;
-      if (messageId) await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["INTERNAL_CHAT_MESSAGE", JSON.stringify({ messageId, roundId: current.id, type: "ROUND", body: roomNotice.body, payload: roomNotice.payload, visibility: "PUBLIC_ROOM" })]);
+      if (messageId) await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["INTERNAL_CHAT_MESSAGE", JSON.stringify({ messageId, messageSeq: Number(message.rows[0].message_seq), roundId: current.id, type: "ROUND", body: roomNotice.body, payload: roomNotice.payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() })]);
     }
     await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["ROUND_STATE_CHANGED", JSON.stringify({ roundId: current.id, from: current.state, to: next, stateVersion: updated.rows[0].state_version, ...payload })]);
     return true;
