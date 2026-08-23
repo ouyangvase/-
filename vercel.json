@@ -3,9 +3,6 @@
   "outputDirectory": "apps/miniapp/dist",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
-  "crons": [
-    { "path": "/api/internal/round-advancer", "schedule": "* * * * *" }
-  ],
   "functions": {
     "api/index.js": { "maxDuration": 30 },
     "api/telegram/webhook.js": { "maxDuration": 10 }
