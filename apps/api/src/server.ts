@@ -180,7 +180,7 @@ function publicResponse(value: unknown): unknown {
   if (typeof value === "string") return value.replaceAll("DEMO CREDIT", "INTERNAL POINTS").replaceAll("Demo Credit", "Internal points").replaceAll("Demo ledger", "Internal ledger").replaceAll("Demo balance", "Account balance").replace(/demo/gi, "internal");
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(publicResponse);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, publicResponse(entry)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !/^demo/i.test(key)).map(([key, entry]) => [key, publicResponse(entry)]));
   return value;
 }
 

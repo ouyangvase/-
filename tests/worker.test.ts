@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advanceDemoRound, claimUnpublishedOutbox, withAdvisoryLock } from "../apps/worker/src/worker";
-import { nextTimedState } from "../apps/worker/src/round-advancer";
+import { hasValidBankerBid, nextTimedState } from "../apps/worker/src/round-advancer";
 
 describe("Worker runtime primitives", () => {
   it("claims each in-memory outbox event once", () => {
@@ -24,5 +24,10 @@ describe("Worker runtime primitives", () => {
     expect(nextTimedState("BANKER_BIDDING")).toBe("BETTING");
     expect(nextTimedState("BETTING")).toBe("WAITING_BANKER_CONFIRM");
     expect(nextTimedState("WAITING_BANKER_CONFIRM")).toBe("ROUND_CANCELLED");
+  });
+
+  it("keeps an expired banker phase alive when a valid bid exists", () => {
+    expect(hasValidBankerBid(0)).toBe(false);
+    expect(hasValidBankerBid("400")).toBe(true);
   });
 });

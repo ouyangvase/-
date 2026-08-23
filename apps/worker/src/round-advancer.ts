@@ -355,6 +355,10 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
   });
 }
 
+export function hasValidBankerBid(bidCount: string | number): boolean {
+  return Number(bidCount) > 0;
+}
+
 export async function advanceExpiredRounds(database: Project12Database, workerId: string, limit = 20): Promise<number> {
   if (!database.configured) return 0;
   const rows = await database.query<DueRound>(`SELECT id, state, state_version, state_ends_at FROM rounds
@@ -372,8 +376,11 @@ export async function advanceExpiredRounds(database: Project12Database, workerId
       continue;
     }
     if (row.state === "BANKER_BIDDING") {
-      if (await cancelExpiredRound(database, row, workerId, "banker bidding deadline elapsed with no bids", true)) advanced += 1;
-      continue;
+      const bidCount = await database.query<{ count: string | number }>("SELECT COUNT(*) AS count FROM banker_bids WHERE round_id = $1", [row.id]);
+      if (!hasValidBankerBid(bidCount[0]?.count ?? 0)) {
+        if (await cancelExpiredRound(database, row, workerId, "banker bidding deadline elapsed with no bids", true)) advanced += 1;
+        continue;
+      }
     }
     if (row.state === "BETTING") {
       const playerCount = await database.query<{ count: string | number }>(`SELECT COUNT(*) AS count FROM round_participants
