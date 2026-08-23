@@ -77,7 +77,7 @@ export class ApiPersistence implements PacketStore {
 
   constructor(database = new Project12Database()) {
     this.database = database;
-    this.strict = (process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production")) !== "demo";
+    this.strict = (process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production")) !== "demo";
   }
 
   get configured(): boolean { return this.database.configured; }
@@ -98,13 +98,13 @@ export class ApiPersistence implements PacketStore {
     return rows[0]?.user_id;
   }
 
-  async ensureRoomMember(telegramUserId: string): Promise<void> {
+  async ensureRoomMember(telegramUserId: string, roundId?: string): Promise<void> {
     await this.run(() => this.database.query(`INSERT INTO room_members (room_id, user_id, left_at)
       SELECT r.room_id, ti.user_id, NULL
       FROM rounds r
       JOIN telegram_identities ti ON ti.telegram_user_id = $1
       WHERE r.id = $2
-      ON CONFLICT (room_id, user_id) DO UPDATE SET left_at = NULL`, [telegramUserId, this.roundDatabaseId]).then(() => undefined));
+      ON CONFLICT (room_id, user_id) DO UPDATE SET left_at = NULL`, [telegramUserId, this.databaseRoundId(roundId)]).then(() => undefined));
   }
 
   async loadVerification(telegramUserId: string): Promise<VerificationSnapshot | undefined> {
@@ -474,44 +474,46 @@ export class ApiPersistence implements PacketStore {
     await this.run(() => this.database.query("INSERT INTO referral_edges (referrer_user_id, referred_user_id, referral_code, source) SELECT rc.user_id, ti.user_id, rc.code, $3 FROM referral_codes rc CROSS JOIN telegram_identities ti WHERE rc.code = $1 AND ti.telegram_user_id = $2 ON CONFLICT (referred_user_id) DO NOTHING", [code === "DEMO-INVITE" ? "P12-DEMO-01" : code, telegramUserId, source]).then(() => undefined));
   }
 
-  async persistBankerBid(telegramUserId: string, amount: number): Promise<void> {
+  async persistBankerBid(telegramUserId: string, amount: number, roundId?: string): Promise<void> {
+    const databaseRoundId = this.databaseRoundId(roundId);
     await this.run(() => this.database.transaction(async (client) => {
-      await client.query("INSERT INTO banker_bids (round_id, user_id, amount) SELECT $1, ti.user_id, $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [this.roundDatabaseId, telegramUserId, amount]);
+      await client.query("INSERT INTO banker_bids (round_id, user_id, amount) SELECT $1, ti.user_id, $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET amount = EXCLUDED.amount", [databaseRoundId, telegramUserId, amount]);
       await client.query(`INSERT INTO round_participants (round_id, user_id, role, status, bet_amount)
         SELECT $1, ti.user_id, 'BANKER', 'ELIGIBLE', NULL FROM telegram_identities ti WHERE ti.telegram_user_id = $2
-        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'BANKER', status = 'ELIGIBLE'`, [this.roundDatabaseId, telegramUserId]);
+        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'BANKER', status = 'ELIGIBLE'`, [databaseRoundId, telegramUserId]);
     }));
   }
 
-  async listBankerBids(): Promise<Array<{ userId: string; amount: number; serverReceivedAt: string }>> {
+  async listBankerBids(roundId?: string): Promise<Array<{ userId: string; amount: number; serverReceivedAt: string }>> {
     if (!this.configured) return [];
     const rows = await this.database.query<{ telegram_user_id: string; amount: string | number; created_at: string | Date }>(`SELECT ti.telegram_user_id, bb.amount, bb.created_at
       FROM banker_bids bb JOIN telegram_identities ti ON ti.user_id = bb.user_id
-      WHERE bb.round_id = $1 ORDER BY bb.amount DESC, bb.created_at ASC, bb.id ASC`, [this.roundDatabaseId]);
+      WHERE bb.round_id = $1 ORDER BY bb.amount DESC, bb.created_at ASC, bb.id ASC`, [this.databaseRoundId(roundId)]);
     return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount), serverReceivedAt: new Date(row.created_at).toISOString() }));
   }
 
-  async persistRoundBanker(telegramUserId: string): Promise<void> {
-    await this.run(() => this.database.query(`UPDATE rounds SET banker_user_id = (SELECT user_id FROM telegram_identities WHERE telegram_user_id = $2) WHERE id = $1`, [this.roundDatabaseId, telegramUserId]).then(() => undefined));
+  async persistRoundBanker(telegramUserId: string, roundId?: string): Promise<void> {
+    await this.run(() => this.database.query(`UPDATE rounds SET banker_user_id = (SELECT user_id FROM telegram_identities WHERE telegram_user_id = $2) WHERE id = $1`, [this.databaseRoundId(roundId), telegramUserId]).then(() => undefined));
   }
 
-  async persistBet(telegramUserId: string, amount: number): Promise<void> {
+  async persistBet(telegramUserId: string, amount: number, roundId?: string): Promise<void> {
+    const databaseRoundId = this.databaseRoundId(roundId);
     await this.run(() => this.database.transaction(async (client) => {
-      await client.query("INSERT INTO bets (round_id, user_id, bet_sequence, amount) SELECT $1, ti.user_id, COALESCE((SELECT max(bet_sequence) + 1 FROM bets b WHERE b.round_id = $1 AND b.user_id = ti.user_id), 1), $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, bet_sequence) DO NOTHING", [this.roundDatabaseId, telegramUserId, amount]);
+      await client.query("INSERT INTO bets (round_id, user_id, bet_sequence, amount) SELECT $1, ti.user_id, COALESCE((SELECT max(bet_sequence) + 1 FROM bets b WHERE b.round_id = $1 AND b.user_id = ti.user_id), 1), $3 FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, bet_sequence) DO NOTHING", [databaseRoundId, telegramUserId, amount]);
       await client.query(`INSERT INTO round_participants (round_id, user_id, role, status, bet_amount)
         SELECT $1, ti.user_id, 'PLAYER', 'ELIGIBLE', SUM(b.amount) FROM telegram_identities ti
         JOIN bets b ON b.user_id = ti.user_id AND b.round_id = $1
         WHERE ti.telegram_user_id = $2 GROUP BY ti.user_id
-        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'PLAYER', status = 'ELIGIBLE', bet_amount = EXCLUDED.bet_amount`, [this.roundDatabaseId, telegramUserId]);
+        ON CONFLICT (round_id, user_id) DO UPDATE SET role = 'PLAYER', status = 'ELIGIBLE', bet_amount = EXCLUDED.bet_amount`, [databaseRoundId, telegramUserId]);
     }));
   }
 
-  async listRoundBettors(): Promise<Array<{ userId: string; amount: number }>> {
+  async listRoundBettors(roundId?: string): Promise<Array<{ userId: string; amount: number }>> {
     if (!this.configured) return [];
     const rows = await this.database.query<{ telegram_user_id: string; amount: string | number }>(`SELECT ti.telegram_user_id, COALESCE(rp.bet_amount, 0) AS amount
       FROM round_participants rp JOIN telegram_identities ti ON ti.user_id = rp.user_id
       WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status IN ('ELIGIBLE', 'CLAIMED', 'AUTO_CLAIMED')
-      ORDER BY rp.joined_at, rp.id`, [this.roundDatabaseId]);
+      ORDER BY rp.joined_at, rp.id`, [this.databaseRoundId(roundId)]);
     return rows.map((row) => ({ userId: row.telegram_user_id, amount: Number(row.amount) }));
   }
 
@@ -526,25 +528,26 @@ export class ApiPersistence implements PacketStore {
     }));
   }
 
-  async persistPacket(provider: string, serverSeedHash: string, serverSeed?: string): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO packet_records (round_id, provider, server_seed_hash, server_seed) VALUES ($1, $2, $3, $4) ON CONFLICT (round_id) DO UPDATE SET provider = EXCLUDED.provider, server_seed_hash = EXCLUDED.server_seed_hash, server_seed = COALESCE(EXCLUDED.server_seed, packet_records.server_seed)", [this.roundDatabaseId, provider, serverSeedHash, serverSeed ?? null]).then(() => undefined));
+  async persistPacket(provider: string, serverSeedHash: string, serverSeed?: string, roundId?: string): Promise<void> {
+    await this.run(() => this.database.query("INSERT INTO packet_records (round_id, provider, server_seed_hash, server_seed) VALUES ($1, $2, $3, $4) ON CONFLICT (round_id) DO UPDATE SET provider = EXCLUDED.provider, server_seed_hash = EXCLUDED.server_seed_hash, server_seed = COALESCE(EXCLUDED.server_seed, packet_records.server_seed)", [this.databaseRoundId(roundId), provider, serverSeedHash, serverSeed ?? null]).then(() => undefined));
   }
 
-  async persistPacketClaim(telegramUserId: string, claimSequence: number, demoValue: number): Promise<void> {
+  async persistPacketClaim(telegramUserId: string, claimSequence: number, packetValue: number, roundId?: string): Promise<void> {
+    const databaseRoundId = this.databaseRoundId(roundId);
     await this.run(() => this.database.transaction(async (client) => {
       const rows = await client.query<{ user_id: string }>("SELECT user_id FROM telegram_identities WHERE telegram_user_id = $1", [telegramUserId]);
       const userId = rows.rows[0]?.user_id;
       if (!userId) throw new Error("Unable to persist packet claim user");
-      await client.query("INSERT INTO claim_records (packet_id, round_id, user_id, claim_sequence, demo_value) SELECT id, $1, $2, $3, $4 FROM packet_records WHERE round_id = $1 ON CONFLICT (round_id, user_id, claim_sequence) DO NOTHING", [this.roundDatabaseId, userId, claimSequence, demoValue]);
+      await client.query("INSERT INTO claim_records (packet_id, round_id, user_id, claim_sequence, demo_value) SELECT id, $1, $2, $3, $4 FROM packet_records WHERE round_id = $1 ON CONFLICT (round_id, user_id, claim_sequence) DO NOTHING", [databaseRoundId, userId, claimSequence, packetValue]);
     }));
   }
 
-  async persistHand(telegramUserId: string, points: number, handType: string, cards: number[]): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO hands (round_id, user_id, points, hand_type, cards) SELECT $1, ti.user_id, $3, $4, $5::jsonb FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET points = EXCLUDED.points, hand_type = EXCLUDED.hand_type, cards = EXCLUDED.cards", [this.roundDatabaseId, telegramUserId, points, handType, JSON.stringify(cards)]).then(() => undefined));
+  async persistHand(telegramUserId: string, points: number, handType: string, cards: number[], roundId?: string): Promise<void> {
+    await this.run(() => this.database.query("INSERT INTO hands (round_id, user_id, points, hand_type, cards) SELECT $1, ti.user_id, $3, $4, $5::jsonb FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id) DO UPDATE SET points = EXCLUDED.points, hand_type = EXCLUDED.hand_type, cards = EXCLUDED.cards", [this.databaseRoundId(roundId), telegramUserId, points, handType, JSON.stringify(cards)]).then(() => undefined));
   }
 
-  async persistSettlement(telegramUserId: string, settlementType: string): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO settlements (round_id, user_id, settlement_type, status) SELECT $1, ti.user_id, $3, 'POSTED' FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, settlement_type) DO UPDATE SET status = 'POSTED'", [this.roundDatabaseId, telegramUserId, settlementType]).then(() => undefined));
+  async persistSettlement(telegramUserId: string, settlementType: string, roundId?: string): Promise<void> {
+    await this.run(() => this.database.query("INSERT INTO settlements (round_id, user_id, settlement_type, status) SELECT $1, ti.user_id, $3, 'POSTED' FROM telegram_identities ti WHERE ti.telegram_user_id = $2 ON CONFLICT (round_id, user_id, settlement_type) DO UPDATE SET status = 'POSTED'", [this.databaseRoundId(roundId), telegramUserId, settlementType]).then(() => undefined));
   }
 
   async createWebAppLaunchGrant(input: { updateId: number; telegramUserId: string; chatId: string; token: string; expiresAt: Date }): Promise<void> {

@@ -7,7 +7,7 @@ type InternalPacketRow = { id: string; total_amount: string | number; max_claims
 type RefundParticipant = { user_id: string; bet_amount: string | number };
 type SettlementLine = { account: "USER_LOCKED" | "BANKER_POOL" | "USER_AVAILABLE" | "PLATFORM_FEE"; direction: "DEBIT" | "CREDIT"; amount: number; reason: string };
 
-const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
+const appMode = process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const configuredServerSeed = process.env.PROJECT12_SERVER_SEED ?? (appMode === "demo" ? "project12-demo-seed-247" : "");
 
 function workerServerSeed(): string {
@@ -160,14 +160,18 @@ async function cancelExpiredRound(database: Project12Database, row: DueRound, wo
     if (!lock.rows[0]?.acquired) return false;
     const currentRows = await client.query<DueRound>("SELECT id, state, state_version, state_ends_at, banker_user_id FROM rounds WHERE id = $1 FOR UPDATE", [row.id]);
     const current = currentRows.rows[0];
-    if (!current || !["BETTING", "WAITING_BANKER_CONFIRM"].includes(current.state) || Number(current.state_version) !== Number(row.state_version) || !current.state_ends_at || new Date(current.state_ends_at).getTime() > Date.now()) return false;
+    if (!current || !["BANKER_BIDDING", "BETTING", "WAITING_BANKER_CONFIRM"].includes(current.state) || Number(current.state_version) !== Number(row.state_version) || !current.state_ends_at || new Date(current.state_ends_at).getTime() > Date.now()) return false;
+    if (current.state === "BANKER_BIDDING") {
+      const bids = await client.query<{ count: string | number }>("SELECT COUNT(*) AS count FROM banker_bids WHERE round_id = $1", [row.id]);
+      if (Number(bids.rows[0]?.count ?? 0) > 0) return false;
+    }
     const participants = await client.query<RefundParticipant>(`SELECT user_id, COALESCE(bet_amount, 0) AS bet_amount
       FROM round_participants WHERE round_id = $1 AND role = 'PLAYER' AND status = 'ELIGIBLE' ORDER BY joined_at, id`, [row.id]);
     const cancelled = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'ROUND_CANCELLED', state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = $2 AND state_version = $3 RETURNING state_version`, [row.id, current.state, row.state_version]);
     if (!cancelled.rows[0]) return false;
     await insertStateEvent(client, row.id, current.state, "ROUND_CANCELLED", Number(cancelled.rows[0].state_version), workerId, { automated: true, reason, participantCount: participants.rows.length });
-    if (emitStopNotice) await insertInternalChatMessage(client, row.id, "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: "game.betting.closed", stageKey: "BETTING_STOPPED", automated: true, reason: "no eligible bets" });
+    if (emitStopNotice) await insertInternalChatMessage(client, row.id, current.state === "BANKER_BIDDING" ? "✅ 平台通知：抢庄时间结束，本局未收到有效庄金，系统正在取消本局并准备下一局。" : "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: current.state === "BANKER_BIDDING" ? "game.banker.expired" : "game.betting.closed", stageKey: current.state === "BANKER_BIDDING" ? "BANKER_BIDDING_EXPIRED" : "BETTING_STOPPED", automated: true, reason: current.state === "BANKER_BIDDING" ? "no banker bids" : "no eligible bets" });
     for (const participant of participants.rows) await refundRoundParticipant(client, row.id, participant);
     const refundStarted = await client.query<{ state_version: number }>(`UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = 'ROUND_CANCELLED' RETURNING state_version`, [row.id, participants.rows.length > 0 ? "REFUNDING" : "REFUNDED"]);
@@ -182,7 +186,7 @@ async function cancelExpiredRound(database: Project12Database, row: DueRound, wo
       finalVersion = Number(refunded.rows[0].state_version);
       await insertStateEvent(client, row.id, "REFUNDING", "REFUNDED", finalVersion, workerId, { automated: true, reason: "stake refund completed" });
     }
-    await insertInternalChatMessage(client, row.id, `⚠️ 本局已取消，${participants.rows.length > 0 ? "下注金额已退回，" : "本局没有有效下注，"}系统将自动开启下一局。`, { templateKey: "game.round.cancelled", automated: true, reason, refundedPlayers: participants.rows.length, stateVersion: finalVersion });
+    await insertInternalChatMessage(client, row.id, `⚠️ 本局已取消，${participants.rows.length > 0 ? "下注金额已退回，" : "本局没有有效参与，"}系统将自动开启下一局。`, { templateKey: "game.round.cancelled", automated: true, reason, refundedPlayers: participants.rows.length, stateVersion: finalVersion });
     await createNextRound(client, row.id, workerId);
     return true;
   });
@@ -365,6 +369,10 @@ export async function advanceExpiredRounds(database: Project12Database, workerId
     }
     if (row.state === "EVALUATING") {
       if (await settleExpiredRound(database, row, workerId)) advanced += 1;
+      continue;
+    }
+    if (row.state === "BANKER_BIDDING") {
+      if (await cancelExpiredRound(database, row, workerId, "banker bidding deadline elapsed with no bids", true)) advanced += 1;
       continue;
     }
     if (row.state === "BETTING") {
