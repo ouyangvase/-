@@ -927,6 +927,14 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
          }
          if (restartCommand && state.round.state === "WAITING_BANKER_CONFIRM") {
            if (state.round.banker !== identity.userId) throw new Error("只有当前庄家可以重推本局");
+           const previousRoundId = state.round.id;
+           if (persistence.configured && appMode !== "demo") {
+             await addRoomMessage("USER", text, { command: "RESTART_ROUND" }, identity.userId, "PUBLIC_ROOM", undefined, previousRoundId);
+             const result = await persistence.restartRound(previousRoundId, identity.userId, "banker requested restart");
+             await hydrateRuntime(activeRuntime());
+             state.user.role = "PLAYER";
+             return { command: "RESTART_ROUND", result: { ...result, state: state.round.state } };
+           }
            await transition("ROUND_CANCELLED", identity.userId, { reason: "banker requested restart", idempotencyKey: key });
            await addRoomMessage("USER", text, { command: "RESTART_ROUND" }, identity.userId);
            await addRoomMessage("ROUND", "本局已按庄家请求取消，等待下一局重新抢庄。", { templateKey: "game.round.cancelled", roundId: state.round.id });

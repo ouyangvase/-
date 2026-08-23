@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Project12Database, type QueryExecutor } from "../../../packages/database/src/index.js";
-import { demoPacketValue } from "../../../packages/game-engine/src/index.js";
+import { demoPacketValue, hashSeed } from "../../../packages/game-engine/src/index.js";
 import type { Journal } from "../../../packages/ledger/src/index.js";
 import type { RoundState } from "../../../packages/contracts/src/index.js";
 import { PacketProviderError, type PacketClaim, type PacketRecord, type PacketStore } from "./providers/packet-provider.js";
@@ -117,6 +117,45 @@ async function transferWalletBalance(input: {
   const debited = await input.client.query("UPDATE wallet_accounts SET balance = balance - $2 WHERE id = $1 AND balance >= $2 RETURNING id", [fromId, input.amount]);
   if (!debited.rows[0]) throw new Error(`Insufficient wallet balance in ${input.from.accountType}`);
   await input.client.query("UPDATE wallet_accounts SET balance = balance + $2 WHERE id = $1", [toId, input.amount]);
+}
+
+async function refundPlayerStake(client: QueryExecutor, roundId: string, participant: { user_id: string; bet_amount: string | number }): Promise<boolean> {
+  const amount = Number(participant.bet_amount);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const journal = await client.query<{ id: string }>(`INSERT INTO ledger_journals
+    (reference_type, reference_id, idempotency_key, reason, created_by)
+    VALUES ('ROUND_REFUND', $1, $2, 'Round cancelled · stake returned', 'api')
+    ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`, [roundId, `round-refund:${roundId}:${participant.user_id}`]);
+  if (journal.rows[0]) {
+    const accounts = await client.query<{ id: string; account_type: "USER_LOCKED" | "USER_AVAILABLE" }>(`SELECT id, account_type
+      FROM wallet_accounts WHERE user_id = $1::uuid AND account_type IN ('USER_LOCKED', 'USER_AVAILABLE') FOR UPDATE`, [participant.user_id]);
+    const lockedId = accounts.rows.find((account) => account.account_type === "USER_LOCKED")?.id;
+    const availableId = accounts.rows.find((account) => account.account_type === "USER_AVAILABLE")?.id;
+    if (!lockedId || !availableId) throw new Error(`Missing player wallet accounts for ${participant.user_id}`);
+    await client.query("INSERT INTO ledger_lines (journal_id, account_id, direction, amount) VALUES ($1, $2, 'DEBIT', $3), ($1, $4, 'CREDIT', $3)", [journal.rows[0].id, lockedId, amount, availableId]);
+    const locked = await client.query("UPDATE wallet_accounts SET balance = balance - $2 WHERE id = $1 AND balance >= $2 RETURNING id", [lockedId, amount]);
+    if (!locked.rows[0]) throw new Error(`Locked wallet balance is insufficient for ${participant.user_id}`);
+    await client.query("UPDATE wallet_accounts SET balance = balance + $2 WHERE id = $1", [availableId, amount]);
+  }
+  await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND user_id = $2::uuid AND role = 'PLAYER'", [roundId, participant.user_id]);
+  return true;
+}
+
+async function insertInternalRoomMessage(client: QueryExecutor, roundId: string, type: string, body: string, payload: Record<string, unknown>): Promise<void> {
+  const message = await client.query<{ id: string; message_seq: number; created_at: string | Date }>(`INSERT INTO room_messages (room_id, round_id, message_type, visibility, template_key, body, payload)
+    SELECT room_id, id, $2, 'PUBLIC_ROOM', $3, $4, $5::jsonb FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [roundId, type, typeof payload.templateKey === "string" ? payload.templateKey : null, body, JSON.stringify(payload)]);
+  const row = message.rows[0];
+  if (!row) return;
+  await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('INTERNAL_CHAT_MESSAGE', $1::jsonb)", [JSON.stringify({
+    messageId: row.id,
+    messageSeq: Number(row.message_seq),
+    roundId,
+    type,
+    body,
+    payload,
+    visibility: "PUBLIC_ROOM",
+    createdAt: iso(row.created_at)
+  })]);
 }
 
 export class ApiPersistence implements PacketStore {
@@ -691,6 +730,89 @@ export class ApiPersistence implements PacketStore {
       if (!updated.rows[0]) throw new Error(`ROUND_STATE_CONFLICT: expected ${event.from ?? "current"}`);
       await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [roundId, event.from ?? null, event.to, JSON.stringify(event.payload), event.actor]);
     }));
+  }
+
+  async restartRound(roundId: string, telegramUserId: string, reason = "banker requested restart"): Promise<{
+    previousRoundId: string;
+    nextRoundId: string;
+    refundedPlayers: number;
+    bankerRefunded: number;
+    state: "BANKER_BIDDING";
+  }> {
+    if (!this.configured) throw new Error("DATABASE_REQUIRED: Restarting a production round requires persistent storage");
+    const databaseRoundId = this.databaseRoundId(roundId);
+    const configuredSeed = process.env.PROJECT12_SERVER_SEED;
+    if (!configuredSeed) throw new Error("PROJECT12_SERVER_SEED is required outside demo mode");
+    const result = await this.database.transaction(async (client) => {
+      const advisory = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS acquired", [databaseRoundId]);
+      if (!advisory.rows[0]?.acquired) throw new Error("ROUND_BUSY: 本局正在处理中，请稍后重试");
+
+      const currentRows = await client.query<{ id: string; room_id: string; rule_version_id: string; state: RoundState; state_version: number; banker_user_id?: string | null }>(`SELECT id::text, room_id::text, rule_version_id::text, state, state_version, banker_user_id::text
+        FROM rounds WHERE id = $1 FOR UPDATE`, [databaseRoundId]);
+      const current = currentRows.rows[0];
+      if (!current || current.state !== "WAITING_BANKER_CONFIRM") throw new Error("ROUND_RESTART_NOT_ALLOWED: 当前不在等待庄家确认阶段");
+
+      const identity = await client.query<{ user_id: string }>("SELECT user_id::text FROM telegram_identities WHERE telegram_user_id = $1 FOR UPDATE", [telegramUserId]);
+      const bankerUserId = identity.rows[0]?.user_id;
+      if (!bankerUserId) throw new Error("TELEGRAM_IDENTITY_NOT_FOUND");
+      if (!current.banker_user_id || current.banker_user_id !== bankerUserId) throw new Error("只有当前庄家可以重推本局");
+
+      const participants = await client.query<{ user_id: string; bet_amount: string | number }>(`SELECT user_id::text, COALESCE(bet_amount, 0) AS bet_amount
+        FROM round_participants WHERE round_id = $1 AND role = 'PLAYER' AND status = 'ELIGIBLE' ORDER BY joined_at, id FOR UPDATE`, [databaseRoundId]);
+      const cancelled = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'ROUND_CANCELLED', state_started_at = now(), state_ends_at = NULL,
+        state_version = state_version + 1 WHERE id = $1 AND state = 'WAITING_BANKER_CONFIRM' AND state_version = $2 RETURNING state_version`, [databaseRoundId, current.state_version]);
+      if (!cancelled.rows[0]) throw new Error("ROUND_STATE_CONFLICT: restart raced with another transition");
+      const cancelledVersion = Number(cancelled.rows[0].state_version);
+      const eventPayload = { manual: true, reason, participantCount: participants.rows.length };
+      await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, 'WAITING_BANKER_CONFIRM', 'ROUND_CANCELLED', $2::jsonb, $3)", [databaseRoundId, JSON.stringify(eventPayload), telegramUserId]);
+      await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STATE_CHANGED', $1::jsonb)", [JSON.stringify({ roundId: databaseRoundId, from: "WAITING_BANKER_CONFIRM", to: "ROUND_CANCELLED", stateVersion: cancelledVersion, actor: telegramUserId, ...eventPayload })]);
+
+      const poolRows = await client.query<{ amount: string | number }>("SELECT amount FROM banker_pools WHERE round_id = $1 FOR UPDATE", [databaseRoundId]);
+      const bankerRefunded = Number(poolRows.rows[0]?.amount ?? 0);
+      if (bankerRefunded > 0) {
+        await transferWalletBalance({ client, referenceType: "BANKER_POOL_REFUND", referenceId: databaseRoundId, idempotencyKey: `banker-pool-refund:${databaseRoundId}`, reason: "Refund banker stake after manual round restart", from: { accountType: "BANKER_POOL" }, to: { accountType: "USER_AVAILABLE", userId: bankerUserId }, amount: bankerRefunded });
+        await client.query("UPDATE banker_pools SET amount = 0, updated_at = now() WHERE round_id = $1", [databaseRoundId]);
+      }
+      await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND role = 'BANKER'", [databaseRoundId]);
+
+      let refundedPlayerCount = 0;
+      for (const participant of participants.rows) {
+        if (await refundPlayerStake(client, databaseRoundId, participant)) refundedPlayerCount += 1;
+      }
+      const refundState = await client.query<{ state_version: number }>(`UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = NULL,
+        state_version = state_version + 1 WHERE id = $1 AND state = 'ROUND_CANCELLED' RETURNING state_version`, [databaseRoundId, refundedPlayerCount > 0 ? "REFUNDING" : "REFUNDED"]);
+      if (!refundState.rows[0]) throw new Error("ROUND_STATE_CONFLICT: unable to start refund");
+      let finalVersion = Number(refundState.rows[0].state_version);
+      const refundTarget = refundedPlayerCount > 0 ? "REFUNDING" : "REFUNDED";
+      await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, 'ROUND_CANCELLED', $2, $3::jsonb, $4)", [databaseRoundId, refundTarget, JSON.stringify({ manual: true, reason, refundedPlayers: refundedPlayerCount }), telegramUserId]);
+      await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STATE_CHANGED', $1::jsonb)", [JSON.stringify({ roundId: databaseRoundId, from: "ROUND_CANCELLED", to: refundTarget, stateVersion: finalVersion, actor: telegramUserId, manual: true, reason, refundedPlayers: refundedPlayerCount })]);
+      if (refundedPlayerCount > 0) {
+        const refunded = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'REFUNDED', state_started_at = now(), state_ends_at = NULL,
+          state_version = state_version + 1 WHERE id = $1 AND state = 'REFUNDING' RETURNING state_version`, [databaseRoundId]);
+        if (!refunded.rows[0]) throw new Error("ROUND_STATE_CONFLICT: unable to complete refund");
+        finalVersion = Number(refunded.rows[0].state_version);
+        await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, 'REFUNDING', 'REFUNDED', $2::jsonb, $3)", [databaseRoundId, JSON.stringify({ manual: true, reason, refundedPlayers: refundedPlayerCount }), telegramUserId]);
+        await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STATE_CHANGED', $1::jsonb)", [JSON.stringify({ roundId: databaseRoundId, from: "REFUNDING", to: "REFUNDED", stateVersion: finalVersion, actor: telegramUserId, manual: true, reason, refundedPlayers: refundedPlayerCount })]);
+      }
+
+      await insertInternalRoomMessage(client, databaseRoundId, "ROUND", `⚠️ 本局已按庄家请求取消，${refundedPlayerCount > 0 ? "下注金额已退回，" : "本局没有有效参与，"}系统将自动开启下一局。`, { templateKey: "game.round.cancelled", manual: true, reason, refundedPlayers: refundedPlayerCount, bankerRefunded, stateVersion: finalVersion });
+      const roomRows = await client.query<{ active_round_id?: string | null }>("SELECT active_round_id FROM game_rooms WHERE id = $1 FOR UPDATE", [current.room_id]);
+      if (roomRows.rows[0]?.active_round_id !== databaseRoundId) throw new Error("ROUND_ACTIVE_CONFLICT: 当前桌面已切换到另一局");
+      const inserted = await client.query<{ id: string }>(`INSERT INTO rounds (room_id, rule_version_id, state, state_ends_at, server_seed_hash)
+        VALUES ($1, $2, 'BANKER_BIDDING', now() + interval '30 seconds', $3) RETURNING id::text`, [current.room_id, current.rule_version_id, hashSeed(`${configuredSeed}:${databaseRoundId}:next`)]);
+      const nextRoundId = inserted.rows[0]?.id;
+      if (!nextRoundId) throw new Error("ROUND_CREATE_FAILED: unable to create next round");
+      await client.query("UPDATE game_rooms SET active_round_id = $2 WHERE id = $1", [current.room_id, nextRoundId]);
+      const nextStateEndsAt = new Date(Date.now() + 30_000).toISOString();
+      const nextPayload = { manual: true, previousRoundId: databaseRoundId, reason };
+      await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, NULL, 'BANKER_BIDDING', $2::jsonb, $3)", [nextRoundId, JSON.stringify(nextPayload), telegramUserId]);
+      await insertInternalRoomMessage(client, nextRoundId, "ROUND", "🟢 新一局已开启，聊天室发送整数庄金开始抢庄。", { templateKey: "game.round.started", stageKey: "BANKER_BIDDING", ...nextPayload });
+      await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STARTED', $1::jsonb)", [JSON.stringify({ roundId: nextRoundId, previousRoundId: databaseRoundId, state: "BANKER_BIDDING", stateEndsAt: nextStateEndsAt, actor: telegramUserId, manual: true })]);
+      this.currentRoundId = nextRoundId;
+      return { previousRoundId: databaseRoundId, nextRoundId, refundedPlayers: refundedPlayerCount, bankerRefunded, state: "BANKER_BIDDING" as const };
+    });
+    this.currentRoundId = result.nextRoundId;
+    return result;
   }
 
   async persistOutbox(type: string, payload: Record<string, unknown>): Promise<void> {
