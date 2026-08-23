@@ -75,7 +75,7 @@ async function autoClaimExpiredRound(database: Project12Database, row: DueRound,
     if (!updated.rows[0]) return false;
     const payload = { automated: true, reason: "packet claim deadline elapsed", packetId: packet.id, claimedCount, maxClaims, seedHash: hashSeed(seed) };
     await insertStateEvent(client, row.id, "CLAIMING", "EVALUATING", Number(updated.rows[0].state_version), workerId, payload);
-    await insertInternalChatMessage(client, row.id, "⌛ 红包领取时间结束，系统已为未领取的本局参与者自动开包，正在算牌。", { templateKey: "game.packet.expired", stageKey: "CLAIMS_ENDED", ...payload });
+    await insertInternalChatMessage(client, row.id, "⌛ 红包领取时间结束，系统已为未领取的本局参与者自动开包，正在算牌。", { templateKey: "game.packet.expired", stageKey: "CLAIMS_ENDED", stageAsset: "/game/stop-packet.jpg", ...payload });
     return true;
   });
 }
@@ -171,7 +171,7 @@ async function cancelExpiredRound(database: Project12Database, row: DueRound, wo
       state_version = state_version + 1 WHERE id = $1 AND state = $2 AND state_version = $3 RETURNING state_version`, [row.id, current.state, row.state_version]);
     if (!cancelled.rows[0]) return false;
     await insertStateEvent(client, row.id, current.state, "ROUND_CANCELLED", Number(cancelled.rows[0].state_version), workerId, { automated: true, reason, participantCount: participants.rows.length });
-    if (emitStopNotice) await insertInternalChatMessage(client, row.id, current.state === "BANKER_BIDDING" ? "✅ 平台通知：抢庄时间结束，本局未收到有效庄金，系统正在取消本局并准备下一局。" : "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: current.state === "BANKER_BIDDING" ? "game.banker.expired" : "game.betting.closed", stageKey: current.state === "BANKER_BIDDING" ? "BANKER_BIDDING_EXPIRED" : "BETTING_STOPPED", automated: true, reason: current.state === "BANKER_BIDDING" ? "no banker bids" : "no eligible bets" });
+    if (emitStopNotice) await insertInternalChatMessage(client, row.id, current.state === "BANKER_BIDDING" ? "✅ 平台通知：抢庄时间结束，本局未收到有效庄金，系统正在取消本局并准备下一局。" : "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: current.state === "BANKER_BIDDING" ? "game.banker.expired" : "game.betting.closed", stageKey: current.state === "BANKER_BIDDING" ? "BANKER_BIDDING_EXPIRED" : "BETTING_STOPPED", ...(current.state === "BETTING" ? { stageAsset: "/game/stop-betting.jpg" } : {}), automated: true, reason: current.state === "BANKER_BIDDING" ? "no banker bids" : "no eligible bets" });
     for (const participant of participants.rows) await refundRoundParticipant(client, row.id, participant);
     const refundStarted = await client.query<{ state_version: number }>(`UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = 'ROUND_CANCELLED' RETURNING state_version`, [row.id, participants.rows.length > 0 ? "REFUNDING" : "REFUNDED"]);

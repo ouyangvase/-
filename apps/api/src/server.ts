@@ -29,8 +29,7 @@ const requiredProductionConfig = [
   "SESSION_SECRET",
   "ADMIN_SESSION_SECRET",
   "DEVICE_TOKEN_SECRET",
-  "INTERNAL_WORKER_SECRET",
-  "CRON_SECRET"
+  "INTERNAL_WORKER_SECRET"
 ] as const;
 function missingProductionConfig(): string[] { return appMode === "demo" ? [] : requiredProductionConfig.filter((name) => !process.env[name]?.trim()); }
 const sessions = new Map<string, { userId: string; role: "PLAYER" | "ADMIN"; expiresAt: number }>();
@@ -294,7 +293,7 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注已结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", stageAsset: "/game/stop-betting.jpg", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
   if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", stageKey: "PACKET_SENT", stageAsset: "/game/start-packet.jpg", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
   if (to === "EVALUATING" && typeof payload.claimedAt === "string") {
-    await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，抢包结束，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
+    await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，抢包结束，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", stageAsset: "/game/stop-packet.jpg", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
     await addRoomMessage("ROUND", "⏳ 红包领取结束，系统正在计算牌型、比较庄家并生成成绩榜。", { templateKey: "game.results.calculating", calculation: true, roundId: state.round.id }, undefined, "PUBLIC_ROOM");
   }
   if (to === "ROUND_COMPLETE") await addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入内部积分账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
