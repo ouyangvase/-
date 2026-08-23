@@ -521,6 +521,11 @@ body { overflow-x: hidden; background: #000; }
 .settings-list button > .eyebrow { min-width: 0; white-space: nowrap; }
 .settings-list button > strong { min-width: 0; margin-top: 0; overflow: hidden; color: var(--paper); font-size: 14px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .settings-list button > .icon { justify-self: end; }
+.update-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: -18px 0 18px; padding: 12px 14px; border: 1px solid rgba(66,133,244,.55); border-radius: 14px; color: var(--paper); background: rgba(66,133,244,.12); }
+.update-banner span { display: grid; gap: 3px; min-width: 0; }
+.update-banner strong { font-size: 12px; }
+.update-banner small { color: var(--muted); font-size: 10px; }
+.update-banner button { flex: 0 0 auto; padding: 8px 11px; border: 1px solid rgba(255,255,255,.24); border-radius: 10px; color: var(--paper); background: rgba(255,255,255,.08); font-size: 11px; }
 .verification-modal .mechanism-input { border-radius: 12px; }
 .verification-close { width: 100%; }
 .bottom-nav { max-width: 448px; border: 1px solid rgba(255,255,255,.1); border-radius: 24px; background: rgba(43,44,50,.94); }

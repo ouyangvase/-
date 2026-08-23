@@ -16,6 +16,9 @@ const port = Number(process.env.API_PORT ?? 8787);
 const appMode = process.env.APP_MODE ?? "demo";
 const telegramMockEnabled = appMode === "demo" && process.env.TELEGRAM_MOCK_ENABLED !== "false";
 const realMoneyDisabled = process.env.REAL_MONEY_ENABLED !== "true";
+const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? process.env.APP_VERSION ?? "0.1.0-demo";
+const buildId = process.env.NEXT_PUBLIC_BUILD_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "local";
+const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT ?? new Date().toISOString();
 const persistence = new ApiPersistence();
 const sessions = new Map<string, { userId: string; role: "PLAYER" | "ADMIN"; expiresAt: number }>();
 const requestSessions = new WeakMap<IncomingMessage, { userId: string; role: "PLAYER" | "ADMIN" }>();
@@ -115,7 +118,7 @@ function corsOrigin(request: IncomingMessage): string {
 }
 
 function json(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, idempotency-key, x-demo-user, x-session-token, x-demo-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" });
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store, no-cache, must-revalidate", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, idempotency-key, x-demo-user, x-session-token, x-demo-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" });
   response.end(status === 204 ? undefined : JSON.stringify(body));
 }
 
@@ -525,6 +528,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "OPTIONS") return json(response, 204, {});
     if (request.method === "POST" && !allowRateLimit(request)) return json(response, 429, { error: "Rate limit exceeded" });
     const healthPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
+    if (request.method === "GET" && healthPath === "/version") return json(response, 200, { version: appVersion, buildId, deployedAt });
     const activeSession = await resolveSession(request);
     const runtime = persistence.configured && activeSession ? createRequestRuntime() : fallbackRuntime;
     if (!healthPath.startsWith("/health")) await hydrateRuntime(runtime);
