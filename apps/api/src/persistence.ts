@@ -396,6 +396,7 @@ export class ApiPersistence implements PacketStore {
       const nextClaimedCount = claimedCount + 1;
       await client.query("UPDATE packet_records SET claimed_amount = $2, claimed_count = $3 WHERE id = $1::uuid", [input.packetId, nextClaimedAmount, nextClaimedCount]);
       await client.query("UPDATE packet_allocations SET claim_status = 'CLAIMED', claimed_at = $3 WHERE packet_id = $1::uuid AND user_id = $2::uuid", [input.packetId, userId, claimedAt]);
+      await client.query("UPDATE round_participants SET status = 'CLAIMED' WHERE round_id = $1::uuid AND user_id = $2::uuid AND role = 'PLAYER'", [this.databaseRoundId(input.roundId), userId]);
       return { packetId: input.packetId, userId: input.userId, value, claimedAt, claimSequence, label: "PROJECT 12 INTERNAL CREDIT · NO CASH VALUE", totalAmount, maxClaims, claimedAmount: nextClaimedAmount, claimedCount: nextClaimedCount, remainingAmount: totalAmount - nextClaimedAmount, remainingClaims: maxClaims - nextClaimedCount };
     });
   }
