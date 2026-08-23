@@ -74,7 +74,7 @@ async function autoClaimExpiredRound(database: Project12Database, row: DueRound,
     if (!updated.rows[0]) return false;
     const payload = { automated: true, reason: "packet claim deadline elapsed", packetId: packet.id, claimedCount, maxClaims, seedHash: hashSeed(seed) };
     await insertStateEvent(client, row.id, "CLAIMING", "EVALUATING", Number(updated.rows[0].state_version), workerId, payload);
-    await insertInternalChatMessage(client, row.id, "⌛ 红包领取时间结束，系统已为未领取的本局参与者自动开包，正在算牌。", { templateKey: "game.packet.expired", ...payload });
+    await insertInternalChatMessage(client, row.id, "⌛ 红包领取时间结束，系统已为未领取的本局参与者自动开包，正在算牌。", { templateKey: "game.packet.expired", stageKey: "CLAIMS_ENDED", ...payload });
     return true;
   });
 }
@@ -242,13 +242,13 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
       ? {
           templateKey: "game.betting.opened",
           body: "平台通知：抢庄结束，最高庄金玩家已成为庄家，下注阶段开始。",
-          payload: { roundId: current.id, state: next, bankerUserId, bankerAmount, automated: true }
+          payload: { roundId: current.id, state: next, stageKey: "BETTING_STARTED", bankerUserId, bankerAmount, automated: true }
         }
       : current.state === "BETTING"
         ? {
             templateKey: "game.betting.closed",
             body: "✅ 平台通知：下注结束，请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。",
-            payload: { roundId: current.id, state: next, automated: true }
+            payload: { roundId: current.id, state: next, stageKey: "BETTING_STOPPED", automated: true }
           }
         : null;
     if (roomNotice) {
