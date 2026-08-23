@@ -4,6 +4,7 @@ import { classifyPacket, demoPacketValue, demoRoundHand, hashSeed, settlePlayer 
 
 type DueRound = { id: string; state: RoundState; state_version: number; state_ends_at: string | Date | null; banker_user_id?: string | null };
 type InternalPacketRow = { id: string; total_amount: string | number; max_claims: string | number; claimed_amount: string | number; claimed_count: string | number };
+type RefundParticipant = { user_id: string; bet_amount: string | number };
 type SettlementLine = { account: "USER_LOCKED" | "BANKER_POOL" | "USER_AVAILABLE" | "PLATFORM_FEE"; direction: "DEBIT" | "CREDIT"; amount: number; reason: string };
 
 const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
@@ -113,7 +114,7 @@ async function postSettlement(client: QueryExecutor, roundId: string, userId: st
   if (!settlement) throw new Error("Unable to create settlement record");
   const idempotencyKey = `round-settlement:${roundId}:${userId}`;
   const journal = await client.query<{ id: string }>(`INSERT INTO ledger_journals (reference_type, reference_id, idempotency_key, reason, created_by)
-    VALUES ('ROUND_SETTLEMENT', $1, $2, $3, 'worker') ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`, [roundId, idempotencyKey, `Round settlement · ${result.outcome} · internal Demo credit`]);
+    VALUES ('ROUND_SETTLEMENT', $1, $2, $3, 'worker') ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`, [roundId, idempotencyKey, `Round settlement · ${result.outcome} · internal points`]);
   if (!journal.rows[0]) throw new Error(`Settlement journal already exists for ${userId}`);
   for (const line of settlementLines(result)) {
     const account = await client.query<{ id: string }>(`SELECT id FROM wallet_accounts WHERE account_type = $1
@@ -130,6 +131,61 @@ async function postSettlement(client: QueryExecutor, roundId: string, userId: st
     VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (round_id, user_id) DO UPDATE SET points = EXCLUDED.points, hand_type = EXCLUDED.hand_type, cards = EXCLUDED.cards`, [roundId, userId, hand.points, hand.type, JSON.stringify(classifyPacket(packetValue.toFixed(2)).digits.slice(-3))]);
   await client.query("UPDATE settlements SET status = 'POSTED' WHERE id = $1", [settlement.id]);
   return { result, posted: true };
+}
+
+async function refundRoundParticipant(client: QueryExecutor, roundId: string, participant: RefundParticipant): Promise<void> {
+  const amount = Number(participant.bet_amount);
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  const idempotencyKey = `round-refund:${roundId}:${participant.user_id}`;
+  const journal = await client.query<{ id: string }>(`INSERT INTO ledger_journals (reference_type, reference_id, idempotency_key, reason, created_by)
+    VALUES ('ROUND_REFUND', $1, $2, 'Round cancelled · stake returned', 'worker')
+    ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`, [roundId, idempotencyKey]);
+  if (journal.rows[0]) {
+    const accounts = await client.query<{ id: string; account_type: "USER_LOCKED" | "USER_AVAILABLE" }>(`SELECT id, account_type
+      FROM wallet_accounts WHERE user_id = $1::uuid AND account_type IN ('USER_LOCKED', 'USER_AVAILABLE') FOR UPDATE`, [participant.user_id]);
+    const lockedId = accounts.rows.find((account) => account.account_type === "USER_LOCKED")?.id;
+    const availableId = accounts.rows.find((account) => account.account_type === "USER_AVAILABLE")?.id;
+    if (!lockedId || !availableId) throw new Error(`Missing player wallet accounts for ${participant.user_id}`);
+    await client.query("INSERT INTO ledger_lines (journal_id, account_id, direction, amount) VALUES ($1, $2, 'DEBIT', $3), ($1, $4, 'CREDIT', $3)", [journal.rows[0].id, lockedId, amount, availableId]);
+    const locked = await client.query("UPDATE wallet_accounts SET balance = balance - $2 WHERE id = $1 AND balance >= $2 RETURNING id", [lockedId, amount]);
+    if (!locked.rows[0]) throw new Error(`Locked wallet balance is insufficient for ${participant.user_id}`);
+    await client.query("UPDATE wallet_accounts SET balance = balance + $2 WHERE id = $1", [availableId, amount]);
+  }
+  await client.query("UPDATE round_participants SET status = 'FAILED' WHERE round_id = $1 AND user_id = $2 AND role = 'PLAYER'", [roundId, participant.user_id]);
+}
+
+async function cancelExpiredRound(database: Project12Database, row: DueRound, workerId: string, reason: string, emitStopNotice = false): Promise<boolean> {
+  return database.transaction(async (client) => {
+    const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS acquired", [row.id]);
+    if (!lock.rows[0]?.acquired) return false;
+    const currentRows = await client.query<DueRound>("SELECT id, state, state_version, state_ends_at, banker_user_id FROM rounds WHERE id = $1 FOR UPDATE", [row.id]);
+    const current = currentRows.rows[0];
+    if (!current || !["BETTING", "WAITING_BANKER_CONFIRM"].includes(current.state) || Number(current.state_version) !== Number(row.state_version) || !current.state_ends_at || new Date(current.state_ends_at).getTime() > Date.now()) return false;
+    const participants = await client.query<RefundParticipant>(`SELECT user_id, COALESCE(bet_amount, 0) AS bet_amount
+      FROM round_participants WHERE round_id = $1 AND role = 'PLAYER' AND status = 'ELIGIBLE' ORDER BY joined_at, id`, [row.id]);
+    const cancelled = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'ROUND_CANCELLED', state_started_at = now(), state_ends_at = NULL,
+      state_version = state_version + 1 WHERE id = $1 AND state = $2 AND state_version = $3 RETURNING state_version`, [row.id, current.state, row.state_version]);
+    if (!cancelled.rows[0]) return false;
+    await insertStateEvent(client, row.id, current.state, "ROUND_CANCELLED", Number(cancelled.rows[0].state_version), workerId, { automated: true, reason, participantCount: participants.rows.length });
+    if (emitStopNotice) await insertInternalChatMessage(client, row.id, "✅ 平台通知：下注时间结束，本局未收到有效下注，系统正在取消本局并准备下一局。", { templateKey: "game.betting.closed", stageKey: "BETTING_STOPPED", automated: true, reason: "no eligible bets" });
+    for (const participant of participants.rows) await refundRoundParticipant(client, row.id, participant);
+    const refundStarted = await client.query<{ state_version: number }>(`UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = NULL,
+      state_version = state_version + 1 WHERE id = $1 AND state = 'ROUND_CANCELLED' RETURNING state_version`, [row.id, participants.rows.length > 0 ? "REFUNDING" : "REFUNDED"]);
+    if (!refundStarted.rows[0]) return false;
+    const refundState = participants.rows.length > 0 ? "REFUNDING" : "REFUNDED";
+    await insertStateEvent(client, row.id, "ROUND_CANCELLED", refundState, Number(refundStarted.rows[0].state_version), workerId, { automated: true, reason: participants.rows.length > 0 ? "refund started" : "no stakes to refund" });
+    let finalVersion = Number(refundStarted.rows[0].state_version);
+    if (participants.rows.length > 0) {
+      const refunded = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'REFUNDED', state_started_at = now(), state_ends_at = NULL,
+        state_version = state_version + 1 WHERE id = $1 AND state = 'REFUNDING' RETURNING state_version`, [row.id]);
+      if (!refunded.rows[0]) return false;
+      finalVersion = Number(refunded.rows[0].state_version);
+      await insertStateEvent(client, row.id, "REFUNDING", "REFUNDED", finalVersion, workerId, { automated: true, reason: "stake refund completed" });
+    }
+    await insertInternalChatMessage(client, row.id, `⚠️ 本局已取消，${participants.rows.length > 0 ? "下注金额已退回，" : "本局没有有效下注，"}系统将自动开启下一局。`, { templateKey: "game.round.cancelled", automated: true, reason, refundedPlayers: participants.rows.length, stateVersion: finalVersion });
+    await createNextRound(client, row.id, workerId);
+    return true;
+  });
 }
 
 async function createNextRound(client: QueryExecutor, completedRoundId: string, workerId: string): Promise<string | undefined> {
@@ -172,7 +228,16 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
       FROM round_participants rp JOIN users u ON u.id = rp.user_id LEFT JOIN telegram_identities ti ON ti.user_id = rp.user_id
       LEFT JOIN LATERAL (SELECT demo_value FROM claim_records cr WHERE cr.round_id = rp.round_id AND cr.user_id = rp.user_id ORDER BY cr.claim_sequence DESC LIMIT 1) claim ON true
       WHERE rp.round_id = $1 AND rp.role = 'PLAYER' AND rp.status IN ('ELIGIBLE', 'CLAIMED', 'AUTO_CLAIMED') ORDER BY rp.joined_at, rp.id`, [row.id]);
-    if (players.rows.length === 0) return false;
+    if (players.rows.length === 0) {
+      const completed = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'ROUND_COMPLETE', state_started_at = now(), state_ends_at = NULL,
+        server_seed = $2, seed_revealed_at = now(), state_version = state_version + 1 WHERE id = $1 AND state = 'EVALUATING' RETURNING state_version`, [row.id, workerServerSeed()]);
+      if (!completed.rows[0]) return false;
+      const payload = { automated: true, reason: "no valid participants", bankerUserId: current.banker_user_id, seedHash: hashSeed(workerServerSeed()) };
+      await insertStateEvent(client, row.id, "EVALUATING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
+      await insertInternalChatMessage(client, row.id, "📊 本局没有有效参与者，结果已结束，下一局即将开始。", { templateKey: "game.results.published", ...payload, results: [] });
+      await createNextRound(client, row.id, workerId);
+      return true;
+    }
     const results: string[] = [];
     const settling = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'SETTLING', state_started_at = now(), state_ends_at = NULL,
       state_version = state_version + 1 WHERE id = $1 AND state = 'EVALUATING' AND state_version = $2 RETURNING state_version`, [row.id, row.state_version]);
@@ -193,7 +258,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     const payload = { automated: true, reason: "settlement posted", bankerUserId: current.banker_user_id, bankerHand, bankerPoolAfter: bankerPool, seedHash: hashSeed(workerServerSeed()), results };
     await insertStateEvent(client, row.id, "SETTLING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
     await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}\n${results.join("\\n")}`, { templateKey: "game.results.published", ...payload, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits });
-    await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部 Demo 账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
+    await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
     await createNextRound(client, row.id, workerId);
     return true;
   });
@@ -203,6 +268,7 @@ const timedCandidates: Partial<Record<RoundState, RoundState>> = {
   LOBBY: "BANKER_BIDDING",
   BANKER_BIDDING: "BETTING",
   BETTING: "WAITING_BANKER_CONFIRM",
+  WAITING_BANKER_CONFIRM: "ROUND_CANCELLED",
   PACKET_SENT: "CLAIMING",
   CLAIMING: "EVALUATING",
   EVALUATING: "SETTLING",
@@ -289,7 +355,7 @@ export async function advanceExpiredRounds(database: Project12Database, workerId
   if (!database.configured) return 0;
   const rows = await database.query<DueRound>(`SELECT id, state, state_version, state_ends_at FROM rounds
     WHERE state_ends_at IS NOT NULL AND state_ends_at <= now()
-      AND state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING')
+      AND state IN ('LOBBY', 'BANKER_BIDDING', 'BETTING', 'WAITING_BANKER_CONFIRM', 'PACKET_SENT', 'CLAIMING', 'EVALUATING', 'SETTLING')
     ORDER BY state_ends_at ASC LIMIT $1`, [limit]);
   let advanced = 0;
   for (const row of rows) {
@@ -299,6 +365,18 @@ export async function advanceExpiredRounds(database: Project12Database, workerId
     }
     if (row.state === "EVALUATING") {
       if (await settleExpiredRound(database, row, workerId)) advanced += 1;
+      continue;
+    }
+    if (row.state === "BETTING") {
+      const playerCount = await database.query<{ count: string | number }>(`SELECT COUNT(*) AS count FROM round_participants
+        WHERE round_id = $1 AND role = 'PLAYER' AND status = 'ELIGIBLE'`, [row.id]);
+      if (Number(playerCount[0]?.count ?? 0) === 0) {
+        if (await cancelExpiredRound(database, row, workerId, "betting deadline elapsed with no valid bets", true)) advanced += 1;
+        continue;
+      }
+    }
+    if (row.state === "WAITING_BANKER_CONFIRM") {
+      if (await cancelExpiredRound(database, row, workerId, "banker confirmation deadline elapsed")) advanced += 1;
       continue;
     }
     if (await advanceRound(database, row, workerId)) advanced += 1;

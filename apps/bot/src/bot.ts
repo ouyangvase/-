@@ -82,7 +82,7 @@ export function buildWelcomeMessage(chatId: string | number, startParam = "", la
 }
 
 export function buildRoundNotification(chatId: string | number, roundId: string, text: string, locale = defaultLocale()): NotificationPayload {
-  const disclaimer = locale === "zh-CN" ? "仅限 Demo 积分，无现金价值。" : "Demo credits only; no cash value.";
+  const disclaimer = locale === "zh-CN" ? "仅限平台内部积分，无现金价值。" : "Internal platform points only; no cash value.";
   return { chat_id: chatId, text: `PROJECT 12 · ${roundId}\n${text}\n\n${disclaimer}`, disable_web_page_preview: true };
 }
 
@@ -107,8 +107,8 @@ export function buildPrivatePacketNotification(chatId: string | number, roundId:
   return {
     chat_id: chatId,
     text: isChinese
-      ? `🧧 平台红包已发出\n回合 ${roundId}\n${amount} PT 内部积分已准备，请在有效时间内领取。\n\n这条消息只发送给本局已下注玩家。旁观者不会收到领取入口。\n仅限 Demo 积分，无现金价值。`
-      : `🧧 The internal packet is ready\nRound ${roundId}\n${amount} PT is ready to claim before it expires.\n\nThis message is sent only to players who bet in this round. Spectators do not receive a claim entry.\nDemo credits only; no cash value.`,
+      ? `🧧 平台红包已发出\n回合 ${roundId}\n${amount} PT 内部积分已准备，请在有效时间内领取。\n\n这条消息只发送给本局已下注玩家。旁观者不会收到领取入口。\n仅限平台内部积分，无现金价值。`
+      : `🧧 The internal packet is ready\nRound ${roundId}\n${amount} PT is ready to claim before it expires.\n\nThis message is sent only to players who bet in this round. Spectators do not receive a claim entry.\nInternal platform points only; no cash value.`,
     disable_web_page_preview: true,
     reply_markup: { inline_keyboard: [[{ text: isChinese ? "打开平台红包" : "Open internal packet", web_app: { url: buildMiniAppUrl({ claim_round: roundId, packet: packetId }) } }]] }
   };

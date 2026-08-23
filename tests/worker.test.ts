@@ -23,5 +23,6 @@ describe("Worker runtime primitives", () => {
     expect(nextTimedState("CLAIMING")).toBe("EVALUATING");
     expect(nextTimedState("BANKER_BIDDING")).toBe("BETTING");
     expect(nextTimedState("BETTING")).toBe("WAITING_BANKER_CONFIRM");
+    expect(nextTimedState("WAITING_BANKER_CONFIRM")).toBe("ROUND_CANCELLED");
   });
 });

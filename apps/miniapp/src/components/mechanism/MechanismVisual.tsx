@@ -19,7 +19,7 @@ export function MechanismVisual({ state = "idle", label = "THE 12 MECHANISM", vi
     <div className="mechanism-core" aria-hidden="true"><span>12</span></div>
     {!videoFailed && videoSrc ? <video className="mechanism-media" src={videoSrc} poster={posterSrc} muted autoPlay loop playsInline preload="metadata" onError={() => setVideoFailed(true)} aria-hidden="true" /> : <img className="mechanism-poster" src={posterSrc} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
     <div className="mechanism-mark mechanism-mark-top" aria-hidden="true">12 / 01</div>
-    <div className="mechanism-mark mechanism-mark-bottom" aria-hidden="true">PRECISION / DEMO</div>
+    <div className="mechanism-mark mechanism-mark-bottom" aria-hidden="true">PRECISION / LIVE</div>
     <span className="mechanism-label">{label}</span>
   </div>;
 }
