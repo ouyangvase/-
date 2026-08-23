@@ -13,7 +13,7 @@ concurrency:
 jobs:
   worker:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     env:
       APP_MODE: staging
       DATABASE_URL: ${{ secrets.PROJECT12_DATABASE_URL }}

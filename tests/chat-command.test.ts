@@ -104,6 +104,10 @@ describe("internal chat game commands", () => {
     const spectatorRoom = await request("/api/chat/rooms/room-12/messages", { headers: spectatorSession });
     const spectatorRoomBody = await spectatorRoom.json() as { messages: Array<{ body: string }> };
     expect(spectatorRoomBody.messages.some((message) => message.body.includes("平台内部红包已发放给本局参与者"))).toBe(false);
+    const participantRoom = await request("/api/chat/rooms/room-12/messages", { headers: numericBettorSession });
+    const participantRoomBody = await participantRoom.json() as { messages: Array<{ type?: string; visibility?: string; payload?: { claimEligible?: boolean } }> };
+    expect(participantRoomBody.messages.some((message) => message.type === "PACKET_CARD" && (message.visibility === "TARGET_USER" || message.payload?.claimEligible === true))).toBe(true);
+    expect(spectatorRoomBody.messages.some((message) => message.type === "PACKET_CARD")).toBe(false);
     const claim = await command(bankerSession, "抢红包", "chat-command-claim");
     expect(claim.status).toBe(200);
     expect((await claim.json()).result.command).toBe("CLAIM_PACKET");
