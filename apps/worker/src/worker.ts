@@ -153,13 +153,27 @@ async function pollRounds(): Promise<number> {
   return advanced;
 }
 
+async function advanceDueRounds(): Promise<number> {
+  let advanced = 0;
+  for (let pass = 0; pass < 20; pass += 1) {
+    const count = await pollRounds();
+    advanced += count;
+    if (count === 0) break;
+  }
+  return advanced;
+}
+
+async function runWorkerCycle(): Promise<{ advanced: number; outboxPublished: number }> {
+  const firstPublished = await pollOutbox();
+  const advanced = await advanceDueRounds();
+  const secondPublished = await pollOutbox();
+  return { advanced, outboxPublished: firstPublished + secondPublished };
+}
+
 export async function runWorkerTick(): Promise<{ advanced: number; outboxPublished: number }> {
   if (appMode !== "demo" && !database.configured) throw new Error("DATABASE_REQUIRED: Worker cannot run outside demo without DATABASE_URL");
   await writeHeartbeat();
-  const firstPublished = await pollOutbox();
-  const advanced = await pollRounds();
-  const secondPublished = await pollOutbox();
-  return { advanced, outboxPublished: firstPublished + secondPublished };
+  return runWorkerCycle();
 }
 
 export async function startWorker(): Promise<void> {
@@ -167,7 +181,7 @@ export async function startWorker(): Promise<void> {
   await runWorkerTick();
   console.log(JSON.stringify({ service: "worker", mode: appMode, status: database.configured ? "ready" : "MOCK_ONLY", worker_id: workerId }));
   const heartbeatTimer = setInterval(() => { void writeHeartbeat().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "heartbeat_failed", error: error instanceof Error ? error.message : "unknown" }))); }, heartbeatIntervalMs);
-  const pollTimer = setInterval(() => { void Promise.all([pollOutbox(), pollRounds()]).catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
+  const pollTimer = setInterval(() => { void runWorkerCycle().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
   let stopped = false;
   let runTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advanceDemoRound, claimUnpublishedOutbox, withAdvisoryLock } from "../apps/worker/src/worker";
-import { formatBettingSummary, hasValidBankerBid, nextTimedState, toPublicSettlementResult } from "../apps/worker/src/round-advancer";
+import { formatBettingInstructions, formatBettingSummary, hasValidBankerBid, nextTimedState, toPublicSettlementResult } from "../apps/worker/src/round-advancer";
 
 describe("Worker runtime primitives", () => {
   it("claims each in-memory outbox event once", () => {
@@ -34,6 +34,12 @@ describe("Worker runtime primitives", () => {
   it("formats the automatic betting close as a real chat event", () => {
     expect(formatBettingSummary([{ displayName: "player-one", amount: 5 }, { displayName: "player-two", amount: 10 }])).toContain("本局下注成功名单（2）");
     expect(formatBettingSummary([{ displayName: "player-one", amount: 5 }])).toContain("@player-one 5");
+  });
+
+  it("formats the automatic betting instructions used by the chat flow", () => {
+    expect(formatBettingInstructions()).toContain("下注时长：50 秒");
+    expect(formatBettingInstructions()).toContain("梭哈范围：sh10～sh177");
+    expect(formatBettingInstructions()).toContain("下注请直接发送金额");
   });
 
   it("keeps automatic settlement results structured for the chat scoreboard", () => {

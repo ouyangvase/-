@@ -50,6 +50,10 @@ export function formatBettingSummary(entries: Array<{ displayName: string; amoun
   return `✅ 下注结束\n\n本局下注成功名单（${entries.length}）：\n${entries.map((entry) => `@${entry.displayName} ${entry.amount}`).join("\n")}`;
 }
 
+export function formatBettingInstructions(): string {
+  return "重要通知 ⚠️\n系统数据以平台记录为准。\n\n下注时长：50 秒\n下注范围：2～17\n梭哈范围：sh10～sh177\n\n下注请直接发送金额\n梭哈请发送「sh金额」";
+}
+
 export function toPublicSettlementResult(input: {
   displayName: string;
   betAmount: number;
@@ -404,6 +408,9 @@ async function advanceRound(database: Project12Database, row: DueRound, workerId
         FROM rounds WHERE id = $1 RETURNING id::text, message_seq, created_at`, [current.id, roomNotice.templateKey, roomNotice.body, JSON.stringify(roomNotice.payload)]);
       const messageId = message.rows[0]?.id;
       if (messageId) await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ($1, $2::jsonb)", ["INTERNAL_CHAT_MESSAGE", JSON.stringify({ messageId, messageSeq: Number(message.rows[0].message_seq), roundId: current.id, type: "ROUND", body: roomNotice.body, payload: roomNotice.payload, visibility: "PUBLIC_ROOM", createdAt: new Date(message.rows[0].created_at).toISOString() })]);
+    }
+    if (current.state === "BANKER_BIDDING") {
+      await insertInternalChatMessage(client, current.id, formatBettingInstructions(), { templateKey: "game.betting.instructions", stageKey: "BETTING_STARTED", automated: true, bankerUserId, bankerAmount });
     }
     if (current.state === "BETTING") {
       const bettors = await client.query<{ display_name: string; amount: string | number }>(`SELECT COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
