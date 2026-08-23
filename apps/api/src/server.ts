@@ -61,6 +61,35 @@ const riskFlags: Array<{ id: string; userId?: string; roundId?: string; status: 
 const adjustments = new Map<string, { id: string; amount: number; reason: string; ticketId: string; createdBy: string; approvedBy?: string; status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED" }>();
 const serverSeed = process.env.PROJECT12_SERVER_SEED ?? "project12-demo-seed-247";
 const packetProvider = createPacketProvider(persistence);
+const demoAutoRoundEnabled = appMode === "demo" && !persistence.configured && process.env.DEMO_AUTO_ROUND !== "false";
+const demoAutomationDueAt = new Map<string, number>();
+const demoAutomationLocks = new Map<string, Promise<void>>();
+
+function demoPhaseDuration(stateName: RoundState): number {
+  const defaults: Partial<Record<RoundState, number>> = {
+    BANKER_BIDDING: 30_000,
+    BETTING: 50_000,
+    WAITING_BANKER_CONFIRM: 8_000,
+    CLAIMING: 15_000,
+    EVALUATING: 1_000,
+    SETTLING: 1_000
+  };
+  const envName: Partial<Record<RoundState, string>> = {
+    BANKER_BIDDING: "DEMO_BANKER_BIDDING_MS",
+    BETTING: "DEMO_BETTING_MS",
+    WAITING_BANKER_CONFIRM: "DEMO_BANKER_CONFIRM_MS",
+    CLAIMING: "DEMO_CLAIM_MS",
+    EVALUATING: "DEMO_EVALUATING_MS",
+    SETTLING: "DEMO_SETTLING_MS"
+  };
+  const override = Number(envName[stateName] ? process.env[envName[stateName]!] : undefined);
+  return Number.isFinite(override) && override > 0 ? override : defaults[stateName] ?? 1_000;
+}
+
+function formatDemoCountdown(milliseconds: number): string {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 const baseState: DemoState = {
   user: { id: "demo-player-01", displayName: "Alex Tan", role: "PLAYER", available: baseBalances.USER_AVAILABLE, locked: baseBalances.USER_LOCKED, riskStatus: "CLEAR" },
@@ -209,20 +238,24 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   const stateEndsAt = stateDeadline(to);
   await persistence.persistRoundEvent({ roundId: state.round.id, from, to, stateEndsAt, payload: { ...payload, stateEndsAt: stateEndsAt?.toISOString() ?? null }, actor });
   state.round.state = to;
+  if (demoAutoRoundEnabled && demoPhaseDuration(to) > 0) {
+    scheduleDemoPhase(state.round.id, to);
+    state.round.endsAt = formatDemoCountdown(demoPhaseDuration(to));
+  }
   const event = { id: `RE-${String(roundEvents.length + 1).padStart(4, "0")}`, roundId: state.round.id, from, to, payload, createdAt: now() };
   roundEvents.unshift(event);
   queueOutbox("ROUND_STATE_CHANGED", { ...event });
   audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload });
-  if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
-  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
-  if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
-  if (to === "EVALUATING" && typeof payload.claimedAt === "string") await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
+  if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", stageKey: "BETTING_STARTED", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
+  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
+  if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", stageKey: "PACKET_SENT", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
+  if (to === "EVALUATING" && typeof payload.claimedAt === "string") await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
   if (to === "ROUND_COMPLETE") await addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入 Demo 账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
   broadcastRoundEvent(event);
   return event;
 }
 async function writeIdempotent(request: IncomingMessage, response: ServerResponse, work: (key: string) => unknown | Promise<unknown>) { const key = header(request, "idempotency-key"); if (!key) return json(response, 400, { error: "Idempotency-Key is required for writes" }); const persisted = await persistence.getIdempotency(key); if (persisted !== undefined) return json(response, 200, { replayed: true, result: persisted }); if (idempotency.has(key)) return json(response, 200, { replayed: true, result: idempotency.get(key) }); const result = await work(key); idempotency.set(key, result); await persistence.putIdempotency(key, session(request)?.userId ?? "anonymous", result); return json(response, 200, { replayed: false, result }); }
-function createSettlementJournal(idempotencyKey: string, result: ReturnType<typeof settlePlayer>): Journal {
+function createSettlementJournal(idempotencyKey: string, result: ReturnType<typeof settlePlayer>, journalId = "J-1005"): Journal {
   const stake = result.stake;
   const grossReward = result.grossReward;
   const fee = result.fee;
@@ -231,7 +264,7 @@ function createSettlementJournal(idempotencyKey: string, result: ReturnType<type
     : result.outcome === "LOSE"
       ? [{ account: "USER_LOCKED" as const, direction: "DEBIT" as const, amount: stake }, { account: "BANKER_POOL" as const, direction: "CREDIT" as const, amount: stake - fee }, { account: "PLATFORM_FEE" as const, direction: "CREDIT" as const, amount: fee }]
       : [{ account: "USER_LOCKED" as const, direction: "DEBIT" as const, amount: stake }, { account: "USER_AVAILABLE" as const, direction: "CREDIT" as const, amount: stake }];
-  const journal: Journal = { id: "J-1005", referenceType: "ROUND_SETTLEMENT", referenceId: state.round.id, idempotencyKey, reason: `Round settlement · ${result.outcome} · demo only`, lines: lines.filter((line) => line.amount > 0) };
+  const journal: Journal = { id: journalId, referenceType: "ROUND_SETTLEMENT", referenceId: state.round.id, idempotencyKey, reason: `Round settlement · ${result.outcome} · demo only`, lines: lines.filter((line) => line.amount > 0) };
   assertBalanced(journal); return journal;
 }
 function createRefundJournal(idempotencyKey: string, amount: number): Journal { const journal = createTransferJournal({ id: "J-1006", referenceType: "ROUND_REFUND", referenceId: state.round.id, idempotencyKey, reason: "Cancelled demo round refund", from: "USER_LOCKED", to: "USER_AVAILABLE", amount }); assertBalanced(journal); return journal; }
@@ -265,7 +298,11 @@ function verificationInput(data: Record<string, unknown>): { legalName: string; 
   if (!/^\d{8,20}$/.test(tngAccountNo)) throw new Error("请输入有效的 TNG eWallet 账号");
   return { legalName, tngAccountNo };
 }
-function messageActor(userId: string): string { return userId === state.user.id ? "你" : `玩家-${userId.slice(-4)}`; }
+function messageActor(userId: string): string {
+  if (userId === state.user.id) return "你";
+  if (userId === "demo-banker-01") return "庄家";
+  return `玩家-${userId.slice(-4)}`;
+}
 async function chatAttachmentInput(data: Record<string, unknown>): Promise<{ name: string; mime: string; size: number; dataUrl?: string; url?: string } | undefined> {
   const raw = data.attachment;
   if (!raw || typeof raw !== "object") return undefined;
@@ -390,6 +427,10 @@ async function executeConfirmPacket(identity: { userId: string }, key: string) {
   packetIds.set(state.round.id, packet.id);
   await persistence.persistPacket(packet.provider, hashSeed(serverSeed));
   await persistence.persistPacketAllocations(packet.id, bettorRows);
+  const totalShove = bettorRows.filter((row) => row.amount >= 10).reduce((sum, row) => sum + row.amount, 0);
+  const successfulBets = bettorRows.map((row) => `${messageActor(row.userId)} ${row.amount}`).join("\n");
+  const bankerAmount = bankerBids.get(state.round.id)?.find((bid) => bid.userId === identity.userId)?.amount ?? 0;
+  await addRoomMessage("BANKER", `庄家：${messageActor(identity.userId)}\n庄钱：${bankerAmount}\n发包金额：${packet.totalAmount}\n发包数量：${packet.maxClaims}\n总下注额：${totalBets}\n总梭哈额：${totalShove}\n\n本局下注成功名单（${bettorRows.length}）：\n${successfulBets || "暂无"}`, { templateKey: "game.betting.summary", summary: true, banker: identity.userId, bankerAmount, packetAmount: packet.totalAmount, packetCount: packet.maxClaims, totalBets, totalShove, successfulBets: bettorRows.map((row) => ({ userId: row.userId, amount: row.amount })) }, undefined, "PUBLIC_ROOM");
   await transition("PACKET_SENT", identity.userId, { amount: packet.totalAmount, packetId: packet.id, maxClaims: packet.maxClaims, bettorCount: bettorRows.length, bettingClosed: true, acceptedAt: now(), packetMode: "INTERNAL", idempotencyKey: key });
   await transition("CLAIMING", identity.userId, { packetId: packet.id, maxClaims: packet.maxClaims });
   for (const bettor of bettorRows) {
@@ -454,6 +495,148 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
   audit(identity.userId, "INTERNAL_PACKET_CLAIMED", "ROUND", state.round.id, undefined, { ...claim, allClaimed, claimedCount: claims.length });
   return { ...claim, hand, results, allClaimed, claimedCount: claims.length, maxClaims: bettorIds.length, state: state.round.state };
 }
+
+function scheduleDemoPhase(roundId: string, roundState: RoundState): void {
+  if (!demoAutoRoundEnabled || roundState === "ROUND_COMPLETE") {
+    demoAutomationDueAt.delete(roundId);
+    return;
+  }
+  demoAutomationDueAt.set(roundId, Date.now() + demoPhaseDuration(roundState));
+}
+
+function updateDemoCountdown(): void {
+  if (!demoAutoRoundEnabled || state.round.state === "ROUND_COMPLETE") return;
+  const dueAt = demoAutomationDueAt.get(state.round.id);
+  if (dueAt !== undefined) state.round.endsAt = formatDemoCountdown(dueAt - Date.now());
+}
+
+async function seedDemoBettors(roundId: string): Promise<void> {
+  const bettors = roundBettors.get(roundId) ?? new Map<string, number>();
+  const bankerId = state.round.banker;
+  const seeded = [
+    { userId: "demo-player-01", amount: 8, text: "8", mode: "BET" },
+    { userId: "demo-player-02", amount: 40, text: "sh40", mode: "SHOVE" },
+    { userId: "demo-player-03", amount: 5, text: "5", mode: "BET" },
+    { userId: "demo-player-04", amount: 16, text: "sh16", mode: "SHOVE" }
+  ] as const;
+  for (const entry of seeded) {
+    if (entry.userId === bankerId || bettors.has(entry.userId)) continue;
+    bettors.set(entry.userId, entry.amount);
+    await addRoomMessage("USER", entry.text, { command: "BET", amount: entry.amount, mode: entry.mode, automated: true }, entry.userId);
+  }
+  roundBettors.set(roundId, bettors);
+}
+
+async function finalizeDemoRound(actor: string, rows: RoundResultRow[]): Promise<void> {
+  if (state.round.state !== "EVALUATING") return;
+  const userResult = rows.find((row) => row.userId === state.user.id);
+  let settlement: ReturnType<typeof settlePlayer> | undefined;
+  let journal: Journal | undefined;
+  if (userResult && balances.USER_LOCKED > 0) {
+    const bankerHand = classifyPacket("3.42").hand;
+    settlement = settlePlayer({ stake: balances.USER_LOCKED, player: userResult.hand, banker: bankerHand, bankerPool: balances.BANKER_POOL });
+    journal = createSettlementJournal(`auto-settlement:${state.round.id}`, settlement, `J-AUTO-${state.round.id}`);
+  }
+  await transition("SETTLING", actor, { automated: true, journalId: journal?.id, outcome: settlement?.outcome ?? "DEMO_ONLY" });
+  if (journal && settlement) {
+    Object.assign(balances, applyJournal(balances, journal));
+    await persistence.persistHand(state.user.id, userResult?.hand.points ?? 0, userResult?.hand.type ?? "普通点数", [3, 4, 2]);
+    await persistence.persistSettlement(state.user.id, settlement.outcome);
+    await persistence.persistJournal(journal, state.user.id);
+    syncUserBalances();
+    state.round.bankPool = balances.BANKER_POOL;
+    state.ledger.unshift({ id: journal.id, reason: journal.reason, change: journal.lines.filter((line) => line.account === "USER_AVAILABLE" && line.direction === "CREDIT").reduce((sum, line) => sum + line.amount, 0), balanceAfter: state.user.available, createdAt: "Just now" });
+    const mission = state.missions.find((item) => item.id === "rounds");
+    if (mission) mission.progress = Math.min(mission.target, mission.progress + 1);
+    const player = state.leaderboard?.find((item) => item.userId === state.user.id);
+    if (player) player.points += Math.round(settlement.netReward);
+  }
+  await transition("ROUND_COMPLETE", actor, { automated: true, journalId: journal?.id, outcome: settlement?.outcome ?? "DEMO_ONLY" });
+  audit(actor, "DEMO_ROUND_AUTO_FINALIZED", "ROUND", state.round.id, undefined, { resultCount: rows.length, journalId: journal?.id });
+}
+
+async function runDemoRoundStep(): Promise<void> {
+  const roundId = state.round.id;
+  switch (state.round.state) {
+    case "BANKER_BIDDING": {
+      const existingBids = bankerBids.get(roundId) ?? [];
+      if (!existingBids.some((bid) => bid.userId === "demo-banker-01")) {
+        await executeBid({ userId: "demo-banker-01" }, `auto-bid:${roundId}`, 3555);
+        await addRoomMessage("USER", "3555", { command: "BID", amount: 3555, automated: true }, "demo-banker-01");
+      }
+      const winner = chooseBanker(bankerBids.get(roundId) ?? []);
+      if (winner) {
+        await addRoomMessage("USER", "结束抢庄", { command: "CLOSE_BANKER", automated: true }, winner.userId);
+        await executeCloseBankerBidding({ userId: winner.userId }, `auto-close-banker:${roundId}`);
+      }
+      return;
+    }
+    case "BETTING": {
+      await seedDemoBettors(roundId);
+      const banker = state.round.banker;
+      if (!banker || banker === "未确定") return;
+      await addRoomMessage("USER", "停止下注", { command: "CLOSE_BETTING", automated: true }, banker);
+      await executeCloseBetting({ userId: banker }, `auto-close-betting:${roundId}`);
+      return;
+    }
+    case "WAITING_BANKER_CONFIRM": {
+      const banker = state.round.banker;
+      if (!banker || banker === "未确定") return;
+      await addRoomMessage("USER", "确认发包", { command: "CONFIRM_PACKET", automated: true }, banker);
+      await executeConfirmPacket({ userId: banker }, `auto-confirm-packet:${roundId}`);
+      return;
+    }
+    case "CLAIMING": {
+      const bettorRows = await roundBettorRows();
+      const packetId = packetIds.get(roundId);
+      if (!packetId) return;
+      let results: RoundResultRow[] | undefined;
+      for (const bettor of bettorRows) {
+        const claims = await packetProvider.getClaims(packetId);
+        if (claims.some((claim) => claim.userId === bettor.userId)) continue;
+        const claim = await executePacketClaim({ userId: bettor.userId }, `auto-claim:${roundId}:${bettor.userId}`);
+        if (claim.results) results = claim.results;
+      }
+      if ((state.round.state as RoundState) === "EVALUATING") await finalizeDemoRound("demo-system", results ?? roundResults.get(roundId) ?? []);
+      return;
+    }
+    case "EVALUATING":
+      await finalizeDemoRound("demo-system", roundResults.get(roundId) ?? []);
+      return;
+    case "SETTLING":
+      await transition("ROUND_COMPLETE", "demo-system", { automated: true, outcome: "DEMO_ONLY" });
+      return;
+    case "ROUND_COMPLETE":
+      demoAutomationDueAt.delete(roundId);
+      return;
+    default:
+      return;
+  }
+}
+
+async function advanceDemoRoundIfDue(): Promise<boolean> {
+  if (!demoAutoRoundEnabled || process.env.NODE_ENV === "test") return false;
+  if (state.round.state === "ROUND_COMPLETE") {
+    demoAutomationDueAt.delete(state.round.id);
+    return false;
+  }
+  if (!demoAutomationDueAt.has(state.round.id)) scheduleDemoPhase(state.round.id, state.round.state);
+  updateDemoCountdown();
+  const dueAt = demoAutomationDueAt.get(state.round.id);
+  if (dueAt === undefined || dueAt > Date.now()) return false;
+  const currentLock = demoAutomationLocks.get(state.round.id);
+  if (currentLock) return false;
+  const work = runDemoRoundStep().finally(() => demoAutomationLocks.delete(state.round.id));
+  demoAutomationLocks.set(state.round.id, work);
+  await work;
+  return true;
+}
+
+export async function advanceDemoRoundNow(): Promise<void> {
+  if (!demoAutoRoundEnabled) throw new Error("Demo round automation is disabled");
+  await runDemoRoundStep();
+}
+
 function onboardingState(userId: string) { const current = onboarding.get(userId) ?? { deviceBound: false, referrerBound: false, pinSet: false }; onboarding.set(userId, current); return current; }
 async function hydrateRuntime(runtime: ApiRuntime): Promise<void> {
   if (!persistence.configured) return;
@@ -534,6 +717,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (!healthPath.startsWith("/health")) await hydrateRuntime(runtime);
     return await runtimeStorage.run(runtime, async () => {
     if (activeSession) await hydrateUserRuntime(activeSession.userId, runtime);
+    await advanceDemoRoundIfDue();
     if (request.method === "GET" && healthPath === "/health/live") return json(response, 200, { ok: true, service: "api", mode: appMode });
     if (request.method === "GET" && healthPath === "/health/worker") { const worker = await workerHealth(); return json(response, worker.status === "unavailable" ? 503 : 200, { ok: worker.status !== "unavailable", service: "worker", ...worker }); }
     if (request.method === "GET" && (healthPath === "/health/ready" || healthPath === "/health")) { const databaseHealth = await persistence.health(); const worker = await workerHealth(); const botConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN); const workerRequired = process.env.REQUIRE_WORKER === "true"; const internalChat = persistence.configured ? "configured" : "demo-only"; const ready = appMode === "demo" ? true : databaseHealth === "healthy" && botConfigured && (!workerRequired || worker.status === "healthy"); return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, services: { api: ready ? "healthy" : "degraded", worker: worker.status, workerRequired, bot: botConfigured ? "configured" : "blocked", internalChat, legacyNativeGroupChat: "disabled_by_architecture", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
@@ -564,7 +748,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     if (request.method === "GET" && url.pathname === "/api/rooms") { const identity = await requireVerifiedPlayer(request, response); return identity ? json(response, 200, [roomSummary()]) : undefined; }
     if (request.method === "GET" && url.pathname === "/api/rooms/room-12") { const identity = await requireVerifiedPlayer(request, response); return identity ? json(response, 200, roomSummary()) : undefined; }
      if (request.method === "GET" && url.pathname === "/api/chat/room") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; await persistence.ensureRoomMember(identity.userId); const before = url.searchParams.get("before") || undefined; const after = url.searchParams.get("after") || undefined; const limit = before ? 30 : 50; const loaded = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, before, limit, after) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).filter((message) => { const sequence = message.messageSeq ?? 0; return (!before || sequence < Number(before)) && (!after || sequence > Number(after)); }).sort((left, right) => (left.messageSeq ?? 0) - (right.messageSeq ?? 0)).slice(-(before ? 30 : 50)); const oldest = loaded[0]; const latest = loaded[loaded.length - 1]; return json(response, 200, { roomId: "room-12", roomName: "十二牛牛游戏群", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool, messages: loaded, hasMore: Boolean(before ? loaded.length === limit : loaded.length === limit && oldest?.messageSeq && oldest.messageSeq > 1), nextCursor: oldest?.messageSeq ? String(oldest.messageSeq) : undefined, latestCursor: latest?.messageSeq ? String(latest.messageSeq) : undefined }); }
-     if (request.method === "GET" && url.pathname === "/api/chat/room/realtime") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; await persistence.ensureRoomMember(identity.userId); response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); const after = url.searchParams.get("after") || undefined; const initialMessages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, undefined, 50, after) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).filter((message) => !after || (message.messageSeq ?? 0) > Number(after)).sort((left, right) => (left.messageSeq ?? 0) - (right.messageSeq ?? 0)).slice(-50); for (const message of initialMessages) writeRoomEvent(response, message); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } roomRealtimeClients.set(response, identity.userId); const heartbeat = setInterval(() => { if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n"); }, 15_000); response.on("close", () => { clearInterval(heartbeat); roomRealtimeClients.delete(response); }); return; }
+     if (request.method === "GET" && url.pathname === "/api/chat/room/realtime") { const identity = await requireVerifiedPlayer(request, response); if (!identity) return undefined; await persistence.ensureRoomMember(identity.userId); response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": responseCorsOrigins.get(response) ?? process.env.CORS_ORIGIN ?? "http://localhost:4173", "access-control-allow-credentials": "true" }); const after = url.searchParams.get("after") || undefined; const initialMessages = persistence.configured ? await persistence.loadRoomMessages(undefined, identity.userId, undefined, 50, after) : roomMessages.filter((message) => canViewRoomMessage(message, identity.userId)).filter((message) => !after || (message.messageSeq ?? 0) > Number(after)).sort((left, right) => (left.messageSeq ?? 0) - (right.messageSeq ?? 0)).slice(-50); for (const message of initialMessages) writeRoomEvent(response, message); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool, endsAt: state.round.endsAt })}\n\n`); if (url.searchParams.get("snapshot") === "1") { response.end(); return; } roomRealtimeClients.set(response, identity.userId); const heartbeat = setInterval(() => { if (response.writableEnded || response.destroyed) return; void advanceDemoRoundIfDue().catch((error: unknown) => console.error(`demo round automation failed: ${error instanceof Error ? error.message : String(error)}`)); response.write(`event: snapshot\ndata: ${JSON.stringify({ roomId: "room-12", roundId: state.round.id, state: state.round.state, banker: state.round.banker, bankPool: state.round.bankPool, endsAt: state.round.endsAt })}\n\n`); }, 1_000); response.on("close", () => { clearInterval(heartbeat); roomRealtimeClients.delete(response); }); return; }
      if (request.method === "POST" && url.pathname === "/api/chat/room/command") {
        const identity = await requireVerifiedPlayer(request, response);
        if (!identity) return undefined;

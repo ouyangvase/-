@@ -122,11 +122,23 @@ function ConnectionStatus({ status }: { status: "connecting" | "connected" | "of
 
 function StageBanner({ state }: { state: DemoState }) {
   const copy = stageCopy(state);
-  return <div className="chat-message-row chat-message-system chat-stage-row"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>系统</small></span><div className="chat-stage-banner"><strong>{copy.title}</strong><span>第 {state.round.id} 局 · {copy.detail}</span></div><time>{state.round.endsAt}</time></div></div>;
+  return <div className="chat-message-row chat-message-system chat-stage-row"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>系统</small></span><div className="chat-stage-banner" data-stage={state.round.state}><i>12</i><strong>{copy.title}</strong><span>第 {state.round.id} 局 · {copy.detail}</span></div><time>{state.round.endsAt}</time></div></div>;
 }
 
 function SystemBubble({ message, text, locale }: { message: ChatMessage; text: string; locale: Locale }) {
   return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>系统</small></span><div className="chat-bubble chat-bubble-system"><p>{text}</p><time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
+}
+
+function StageAnnouncement({ message, locale }: { message: ChatMessage; locale: Locale }) {
+  const stageKey = typeof message.payload?.stageKey === "string" ? message.payload.stageKey : "ROUND";
+  const copy: { title: string; label: string } = ({
+    BETTING_STARTED: { title: "开始下注", label: "下注 2–17 · 梭哈 sh10–sh177" },
+    BETTING_STOPPED: { title: "停止下注", label: "下注已封盘，等待庄家确认发包" },
+    PACKET_SENT: { title: "开始抢包", label: "仅本局已下注玩家可以领取" },
+    CLAIMS_ENDED: { title: "停止抢包", label: "红包领取结束，系统正在计算结果" },
+    ROUND: { title: "回合通知", label: "聊天室实时同步" }
+  }[stageKey] ?? { title: "回合通知", label: "聊天室实时同步" });
+  return <div className="chat-message-row chat-message-system chat-stage-announcement-row"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>阶段通知</small></span><div className="chat-stage-announcement" data-stage={stageKey}><i>{stageKey === "PACKET_SENT" ? "抢" : stageKey === "CLAIMS_ENDED" ? "止" : "12"}</i><strong>{copy.title}</strong><span>{copy.label}</span></div><time>{timeLabel(message.createdAt, locale)}</time></div></div>;
 }
 
 function ImageMessage({ message, own, locale }: { message: ChatMessage; own: boolean; locale: Locale }) {
@@ -151,8 +163,17 @@ function Scoreboard({ message, text, locale }: { message: ChatMessage; text: str
 
 function BankerSummary({ message, text, locale }: { message: ChatMessage; text: string; locale: Locale }) {
   const banker = typeof message.payload?.banker === "string" ? message.payload.banker : message.actor ?? "庄家";
-  const amount = typeof message.payload?.amount === "number" ? message.payload.amount : undefined;
-  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>庄家通知</small></span><div className="chat-structured-bubble chat-banker-summary"><strong>庄家确认</strong><p>{banker}{amount ? ` · 庄金 ${amount} PT` : ""}</p><small>{text}</small><time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
+  const amount = typeof message.payload?.bankerAmount === "number" ? message.payload.bankerAmount : undefined;
+  const fields = [
+    ["庄家", banker],
+    ["庄钱", amount != null ? `${amount} PT` : "—"],
+    ["发包金额", typeof message.payload?.packetAmount === "number" ? `${message.payload.packetAmount} PT` : "—"],
+    ["发包数量", typeof message.payload?.packetCount === "number" ? String(message.payload.packetCount) : "—"],
+    ["总下注额", typeof message.payload?.totalBets === "number" ? `${message.payload.totalBets} PT` : "—"],
+    ["总梭哈额", typeof message.payload?.totalShove === "number" ? `${message.payload.totalShove} PT` : "—"]
+  ];
+  const bettors = Array.isArray(message.payload?.successfulBets) ? message.payload.successfulBets as Array<Record<string, unknown>> : [];
+  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>本局明细</small></span><div className="chat-structured-bubble chat-banker-summary"><strong>停止下注 · 发包明细</strong><div className="chat-summary-grid">{fields.map(([label, value]) => <span key={label}><small>{label}</small><b>{value}</b></span>)}</div>{bettors.length > 0 && <div className="chat-bettor-list"><small>本局下注成功名单（{bettors.length}）</small>{bettors.map((bettor, index) => <span key={`${String(bettor.userId ?? "player")}-${index}`}>{String(bettor.userId ?? "玩家")} · {String(bettor.amount ?? "—")}</span>)}</div>}<p className="chat-summary-source">{text.split("\n\n本局下注成功名单")[0]}</p><time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
 }
 
 function PlayerBubble({ message, own, text, locale }: { message: ChatMessage; own: boolean; text: string; locale: Locale }) {
@@ -167,6 +188,7 @@ function MessageGroup({ message, state, locale, formatMessage }: { message: Chat
   }
   if (message.type === "RESULTS") return <Scoreboard message={message} text={text} locale={locale} />;
   if (message.type === "BANKER" && message.payload?.summary === true) return <BankerSummary message={message} text={text} locale={locale} />;
+  if (typeof message.payload?.stageKey === "string") return <StageAnnouncement message={message} locale={locale} />;
   if (message.payload?.messageType === "IMAGE") return <ImageMessage message={message} own={isOwnMessage(message, state.user.displayName)} locale={locale} />;
   if (isSystemMessage(message)) return <SystemBubble message={message} text={text} locale={locale} />;
   return <PlayerBubble message={message} own={isOwnMessage(message, state.user.displayName)} text={text} locale={locale} />;
