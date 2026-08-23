@@ -44,11 +44,13 @@ export class Project12Database {
         to_regclass('public.users') IS NOT NULL
         AND to_regclass('public.telegram_identities') IS NOT NULL
         AND to_regclass('public.rounds') IS NOT NULL
+        AND to_regclass('public.game_rooms') IS NOT NULL
         AND to_regclass('public.ledger_journals') IS NOT NULL
         AND to_regclass('public.outbox_events') IS NOT NULL
         AND to_regclass('public.telegram_launch_grants') IS NOT NULL
         AND to_regclass('public.worker_heartbeats') IS NOT NULL
         AND EXISTS (SELECT 1 FROM rounds WHERE id::text = $1)
+        AND EXISTS (SELECT 1 FROM game_rooms WHERE active_round_id IS NULL OR EXISTS (SELECT 1 FROM rounds active_round WHERE active_round.id = game_rooms.active_round_id))
         AND EXISTS (SELECT 1 FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL') AS ready`, [canonicalRoundId]);
       return result.rows[0]?.ready ? "healthy" : "unavailable";
     } catch { return "unavailable"; }

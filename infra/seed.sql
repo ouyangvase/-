@@ -53,6 +53,8 @@ BEGIN
   INSERT INTO rounds (id, room_id, rule_version_id, state, state_ends_at, server_seed_hash, banker_user_id)
   VALUES ('00000000-0000-0000-0001-000000000004', '00000000-0000-0000-0001-000000000003', rule_id, 'BANKER_BIDDING', now() + interval '28 seconds', 'demo-seed-hash', NULL)
   ON CONFLICT (id) DO UPDATE SET room_id = EXCLUDED.room_id, rule_version_id = EXCLUDED.rule_version_id;
+  UPDATE game_rooms SET active_round_id = '00000000-0000-0000-0001-000000000004'
+  WHERE id = '00000000-0000-0000-0001-000000000003' AND active_round_id IS NULL;
 
   FOR i IN 1..30 LOOP
     round_id := md5(format('project12-history-round-%s', i))::uuid;

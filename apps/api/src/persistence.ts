@@ -12,7 +12,7 @@ const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 type AuditInput = { actor: string; action: string; referenceType: string; referenceId: string; before?: unknown; after?: unknown };
 type RoundEventInput = { roundId: string; from?: RoundState; to: RoundState; stateEndsAt?: Date | null; payload: Record<string, unknown>; actor: string };
 type WorkerHeartbeat = { workerId: string; status: string; heartbeatAt: string };
-export type RoundRuntimeSnapshot = { state: RoundState; bankerUserId?: string; bankerPool: number };
+export type RoundRuntimeSnapshot = { roundId: string; state: RoundState; stateEndsAt?: string; bankerUserId?: string; bankerPool: number };
 
 type PacketRow = {
   id: string;
@@ -73,7 +73,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 export class ApiPersistence implements PacketStore {
   private readonly database: Project12Database;
   private readonly strict: boolean;
-  readonly roundDatabaseId = process.env.DEMO_ROUND_DB_ID ?? defaultRoundId;
+  private currentRoundId = process.env.DEMO_ROUND_DB_ID ?? defaultRoundId;
 
   constructor(database = new Project12Database()) {
     this.database = database;
@@ -81,6 +81,8 @@ export class ApiPersistence implements PacketStore {
   }
 
   get configured(): boolean { return this.database.configured; }
+
+  get roundDatabaseId(): string { return this.currentRoundId; }
 
   private databaseRoundId(roundId?: string): string {
     return roundId && uuidPattern.test(roundId) ? roundId : this.roundDatabaseId;
@@ -193,7 +195,7 @@ export class ApiPersistence implements PacketStore {
       FROM room_messages rm
       LEFT JOIN users u ON u.id = rm.user_id
       LEFT JOIN telegram_identities target_ti ON target_ti.user_id = rm.target_user_id
-      WHERE rm.round_id = $1
+      WHERE ${roundId ? "rm.round_id = $1" : "rm.room_id = (SELECT room_id FROM rounds WHERE id = $1)"}
         AND (($3::bigint IS NULL AND $4::timestamptz IS NULL) OR ($3::bigint IS NOT NULL AND rm.message_seq < $3::bigint) OR ($4::timestamptz IS NOT NULL AND rm.created_at < $4::timestamptz))
         AND ($5::bigint IS NULL OR rm.message_seq > $5::bigint)
         AND (
@@ -445,9 +447,19 @@ export class ApiPersistence implements PacketStore {
 
   async loadRoundRuntime(): Promise<RoundRuntimeSnapshot | undefined> {
     if (!this.configured) return undefined;
-    const rows = await this.database.query<{ state: RoundState; banker_user_id?: string; banker_pool: string | number }>("SELECT r.state, r.banker_user_id, COALESCE((SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL'), 0) AS banker_pool FROM rounds r WHERE r.id = $1", [this.roundDatabaseId]);
+    const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_user_id?: string; banker_pool: string | number }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, r.banker_user_id,
+      COALESCE((SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL'), 0) AS banker_pool
+      FROM rounds r
+      WHERE r.id = COALESCE(
+        (SELECT gr.active_round_id FROM game_rooms gr
+          JOIN rounds seed_round ON seed_round.room_id = gr.id
+          WHERE seed_round.id = $1::uuid),
+        $1::uuid
+      )`, [this.roundDatabaseId]);
     const row = rows[0];
-    return row ? { state: row.state, bankerUserId: row.banker_user_id, bankerPool: Number(row.banker_pool) } : undefined;
+    if (!row) return undefined;
+    this.currentRoundId = row.round_id;
+    return { roundId: row.round_id, state: row.state, ...(row.state_ends_at ? { stateEndsAt: iso(row.state_ends_at) } : {}), bankerUserId: row.banker_user_id, bankerPool: Number(row.banker_pool) };
   }
 
   async persistDevice(telegramUserId: string, publicKey: string): Promise<void> {
@@ -560,9 +572,10 @@ export class ApiPersistence implements PacketStore {
 
   async persistRoundEvent(event: RoundEventInput): Promise<void> {
     await this.run(() => this.database.transaction(async (client) => {
-      const updated = await client.query<{ id: string }>("UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = $3, state_version = state_version + 1 WHERE id = $1 AND ($4::text IS NULL OR state = $4) RETURNING id", [this.roundDatabaseId, event.to, event.stateEndsAt ?? null, event.from ?? null]);
+      const roundId = this.databaseRoundId(event.roundId);
+      const updated = await client.query<{ id: string }>("UPDATE rounds SET state = $2, state_started_at = now(), state_ends_at = $3, state_version = state_version + 1 WHERE id = $1 AND ($4::text IS NULL OR state = $4) RETURNING id", [roundId, event.to, event.stateEndsAt ?? null, event.from ?? null]);
       if (!updated.rows[0]) throw new Error(`ROUND_STATE_CONFLICT: expected ${event.from ?? "current"}`);
-      await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [this.roundDatabaseId, event.from ?? null, event.to, JSON.stringify(event.payload), event.actor]);
+      await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, $2, $3, $4::jsonb, $5)", [roundId, event.from ?? null, event.to, JSON.stringify(event.payload), event.actor]);
     }));
   }
 

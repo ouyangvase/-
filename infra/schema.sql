@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS round_rule_versions (
 );
 CREATE TABLE IF NOT EXISTS game_rooms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), game_id uuid NOT NULL REFERENCES games(id), name text NOT NULL,
-  status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'PAUSED', 'CLOSED')), created_at timestamptz NOT NULL DEFAULT now()
+  status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'PAUSED', 'CLOSED')), active_round_id uuid, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS room_members (
   room_id uuid NOT NULL REFERENCES game_rooms(id), user_id uuid NOT NULL REFERENCES users(id), joined_at timestamptz NOT NULL DEFAULT now(), left_at timestamptz,
@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS rounds (
   state_started_at timestamptz NOT NULL DEFAULT now(), state_ends_at timestamptz, state_version bigint NOT NULL DEFAULT 1, banker_user_id uuid REFERENCES users(id),
   server_seed_hash text, server_seed text, seed_revealed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE game_rooms ADD COLUMN IF NOT EXISTS active_round_id uuid;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_rooms_active_round_id_fkey') THEN
+    ALTER TABLE game_rooms ADD CONSTRAINT game_rooms_active_round_id_fkey FOREIGN KEY (active_round_id) REFERENCES rounds(id);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_game_rooms_active_round ON game_rooms(active_round_id);
 CREATE TABLE IF NOT EXISTS round_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL REFERENCES rounds(id), from_state text, to_state text NOT NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb, actor text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()

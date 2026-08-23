@@ -132,6 +132,26 @@ async function postSettlement(client: QueryExecutor, roundId: string, userId: st
   return { result, posted: true };
 }
 
+async function createNextRound(client: QueryExecutor, completedRoundId: string, workerId: string): Promise<string | undefined> {
+  const currentRows = await client.query<{ room_id: string; rule_version_id: string }>("SELECT room_id, rule_version_id FROM rounds WHERE id = $1 FOR UPDATE", [completedRoundId]);
+  const current = currentRows.rows[0];
+  if (!current) return undefined;
+  const roomRows = await client.query<{ active_round_id?: string | null }>("SELECT active_round_id FROM game_rooms WHERE id = $1 FOR UPDATE", [current.room_id]);
+  const room = roomRows.rows[0];
+  if (!room || room.active_round_id !== completedRoundId) return room?.active_round_id ?? undefined;
+
+  const inserted = await client.query<{ id: string }>(`INSERT INTO rounds (room_id, rule_version_id, state, state_ends_at, server_seed_hash)
+    VALUES ($1, $2, 'BANKER_BIDDING', now() + interval '30 seconds', $3)
+    RETURNING id::text`, [current.room_id, current.rule_version_id, hashSeed(`${workerServerSeed()}:${completedRoundId}:next`)]);
+  const nextRoundId = inserted.rows[0]?.id;
+  if (!nextRoundId) return undefined;
+  await client.query("UPDATE game_rooms SET active_round_id = $2 WHERE id = $1", [current.room_id, nextRoundId]);
+  await client.query("INSERT INTO round_events (round_id, from_state, to_state, payload, actor) VALUES ($1, NULL, 'BANKER_BIDDING', $2::jsonb, $3)", [nextRoundId, JSON.stringify({ automated: true, previousRoundId: completedRoundId, reason: "previous round settled" }), `worker:${workerId}`]);
+  await insertInternalChatMessage(client, nextRoundId, "🟢 新一局已开启，聊天室发送整数庄金开始抢庄。", { templateKey: "game.round.started", stageKey: "BANKER_BIDDING", automated: true, previousRoundId: completedRoundId });
+  await client.query("INSERT INTO outbox_events (event_type, payload) VALUES ('ROUND_STARTED', $1::jsonb)", [JSON.stringify({ roundId: nextRoundId, previousRoundId: completedRoundId, state: "BANKER_BIDDING", stateEndsAt: new Date(Date.now() + 30_000).toISOString(), actor: `worker:${workerId}` })]);
+  return nextRoundId;
+}
+
 async function settleExpiredRound(database: Project12Database, row: DueRound, workerId: string): Promise<boolean> {
   return database.transaction(async (client) => {
     const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS acquired", [row.id]);
@@ -174,6 +194,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     await insertStateEvent(client, row.id, "SETTLING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
     await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}\n${results.join("\\n")}`, { templateKey: "game.results.published", ...payload, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits });
     await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部 Demo 账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
+    await createNextRound(client, row.id, workerId);
     return true;
   });
 }
