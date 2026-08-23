@@ -131,6 +131,12 @@ function SystemBubble({ message, text, locale }: { message: ChatMessage; text: s
 
 function StageAnnouncement({ message, locale }: { message: ChatMessage; locale: Locale }) {
   const stageKey = typeof message.payload?.stageKey === "string" ? message.payload.stageKey : "ROUND";
+  const stageAsset = ({
+    BETTING_STARTED: "/game/start-betting.jpg",
+    BETTING_STOPPED: "/game/stop-betting.jpg",
+    PACKET_SENT: "/game/start-packet.jpg",
+    CLAIMS_ENDED: "/game/stop-packet.jpg"
+  } as Record<string, string | undefined>)[stageKey];
   const copy: { title: string; label: string } = ({
     BETTING_STARTED: { title: "开始下注", label: "下注 2–17 · 梭哈 sh10–sh177" },
     BETTING_STOPPED: { title: "停止下注", label: "下注已封盘，等待庄家确认发包" },
@@ -138,7 +144,7 @@ function StageAnnouncement({ message, locale }: { message: ChatMessage; locale: 
     CLAIMS_ENDED: { title: "停止抢包", label: "红包领取结束，系统正在计算结果" },
     ROUND: { title: "回合通知", label: "聊天室实时同步" }
   }[stageKey] ?? { title: "回合通知", label: "聊天室实时同步" });
-  return <div className="chat-message-row chat-message-system chat-stage-announcement-row"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>阶段通知</small></span><div className="chat-stage-announcement" data-stage={stageKey}><i>{stageKey === "PACKET_SENT" ? "抢" : stageKey === "CLAIMS_ENDED" ? "止" : "12"}</i><strong>{copy.title}</strong><span>{copy.label}</span></div><time>{timeLabel(message.createdAt, locale)}</time></div></div>;
+  return <div className="chat-message-row chat-message-system chat-stage-announcement-row"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>阶段通知</small></span><div className={`chat-stage-announcement${stageAsset ? " has-art" : ""}`} data-stage={stageKey} data-stage-asset={stageAsset ?? "none"}>{stageAsset ? <img className="chat-stage-art" src={stageAsset} alt={copy.title} /> : <i>{stageKey === "PACKET_SENT" ? "抢" : stageKey === "CLAIMS_ENDED" ? "止" : "12"}</i>}<div className="chat-stage-caption"><strong>{copy.title}</strong><span>{copy.label}</span></div></div><time>{timeLabel(message.createdAt, locale)}</time></div></div>;
 }
 
 function ImageMessage({ message, own, locale }: { message: ChatMessage; own: boolean; locale: Locale }) {
