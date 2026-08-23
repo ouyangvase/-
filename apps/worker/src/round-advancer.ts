@@ -62,6 +62,11 @@ export function formatBankerBettingOpened(displayName: string | null | undefined
   return `平台通知：${bankerLabel} 抢庄 ${bankerAmount} PT，当前进入下注阶段。`;
 }
 
+export function formatSettlementNotice(displayName: string | null | undefined, handType: string, points: number, amount: number): string {
+  const bankerLabel = displayName?.trim() ? chatMention(displayName) : "最高庄金玩家";
+  return `📊 本局成绩已公布\n庄家：${bankerLabel} · ${handType}${points} · 牌面 ${amount}`;
+}
+
 export function formatBettingInstructions(): string {
   return "重要通知 ⚠️\n系统数据以平台记录为准。\n\n下注时长：50 秒\n下注范围：2～17\n梭哈范围：sh10～sh177\n\n下注请直接发送金额\n梭哈请发送「sh金额」";
 }
@@ -339,6 +344,9 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     const current = currentRows.rows[0];
     if (!current || current.state !== "EVALUATING" || Number(current.state_version) !== Number(row.state_version) || !current.state_ends_at || new Date(current.state_ends_at).getTime() > Date.now()) return false;
     if (!current.banker_user_id) return false;
+    const bankerProfile = await client.query<{ display_name: string }>(`SELECT COALESCE(ti.username, u.display_name, $2) AS display_name
+      FROM users u LEFT JOIN telegram_identities ti ON ti.user_id = u.id WHERE u.id = $1`, [current.banker_user_id, current.banker_user_id]);
+    const bankerDisplayName = bankerProfile.rows[0]?.display_name?.trim() || current.banker_user_id;
     const poolRows = await client.query<{ balance: string | number }>("SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL' FOR UPDATE", []);
     if (!poolRows.rows[0]) throw new Error("Missing banker pool account");
     let bankerPool = Number(poolRows.rows[0].balance);
@@ -391,9 +399,9 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     const completed = await client.query<{ state_version: number }>(`UPDATE rounds SET state = 'ROUND_COMPLETE', state_started_at = now(), state_ends_at = NULL,
       server_seed = $2, seed_revealed_at = now(), state_version = state_version + 1 WHERE id = $1 AND state = 'SETTLING' RETURNING state_version`, [row.id, workerServerSeed()]);
     if (!completed.rows[0]) return false;
-    const payload = { automated: true, reason: "settlement posted", bankerUserId: current.banker_user_id, bankerHand, bankerPoolAfter: bankerPool, seedHash: hashSeed(workerServerSeed()), results };
+    const payload = { automated: true, reason: "settlement posted", bankerUserId: current.banker_user_id, bankerDisplayName, bankerHand, bankerPoolAfter: bankerPool, seedHash: hashSeed(workerServerSeed()), results };
     await insertStateEvent(client, row.id, "SETTLING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
-    await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}`, { templateKey: "game.results.published", ...payload, banker: current.banker_user_id, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits }, "RESULTS");
+    await insertInternalChatMessage(client, row.id, formatSettlementNotice(bankerDisplayName, bankerHand.type, bankerHand.points, Number(bankerRound.amount)), { templateKey: "game.results.published", ...payload, banker: bankerDisplayName, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits }, "RESULTS");
     await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
     await createNextRound(client, row.id, workerId);
     return true;

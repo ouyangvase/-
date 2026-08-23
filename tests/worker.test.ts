@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advanceDemoRound, claimUnpublishedOutbox, withAdvisoryLock } from "../apps/worker/src/worker";
-import { formatBankerBettingOpened, formatBettingInstructions, formatBettingSummary, hasValidBankerBid, nextTimedState, toPublicSettlementResult } from "../apps/worker/src/round-advancer";
+import { formatBankerBettingOpened, formatBettingInstructions, formatBettingSummary, formatSettlementNotice, hasValidBankerBid, nextTimedState, toPublicSettlementResult } from "../apps/worker/src/round-advancer";
 
 describe("Worker runtime primitives", () => {
   it("claims each in-memory outbox event once", () => {
@@ -40,6 +40,11 @@ describe("Worker runtime primitives", () => {
   it("shows the banker identity and amount when betting starts", () => {
     expect(formatBankerBettingOpened("@dealer", 500)).toBe("平台通知：@dealer 抢庄 500 PT，当前进入下注阶段。");
     expect(formatBankerBettingOpened(null, null)).toContain("最高庄金玩家");
+  });
+
+  it("shows the banker identity in the automatic settlement notice", () => {
+    expect(formatSettlementNotice("@dealer", "牛牛", 12, 500)).toBe("📊 本局成绩已公布\n庄家：@dealer · 牛牛12 · 牌面 500");
+    expect(formatSettlementNotice("banker", "普通点数", 7, 300)).toContain("庄家：@banker");
   });
 
   it("formats the automatic betting instructions used by the chat flow", () => {
