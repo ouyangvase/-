@@ -329,9 +329,10 @@ export function resolveLocale(preferred: string | null | undefined, telegramLang
 export function translate(locale: Locale, key: TranslationKey, values: Record<string, string | number> = {}): string {
   const template = messages[locale][key] ?? messages.en[key] ?? key;
   const rendered = template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
-  if (locale === "zh-CN") return rendered.replaceAll("Demo 积分", "内部积分").replaceAll("Demo 余额", "账户余额").replaceAll("Demo 结算记录", "结算记录").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("本 Demo", "本版本").replaceAll("Demo 设备标识", "本地设备标识").replaceAll("Demo", "内部");
-  if (locale === "zh-TW") return rendered.replaceAll("Demo 積分", "內部積分").replaceAll("Demo 餘額", "帳戶餘額").replaceAll("Demo 帳本", "帳本").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("本 Demo", "本版本").replaceAll("Demo", "內部");
-  return rendered.replaceAll("Demo Credit", "Internal Credit").replaceAll("Demo ledger", "Internal ledger").replaceAll("Demo balance", "Account balance").replaceAll("Demo settlement record", "Settlement record").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("Demo device ID", "Local device ID").replaceAll("Demo", "Internal");
+  const localized = rendered.replaceAll("رصيد تجريبي", "الرصيد الداخلي").replaceAll("تجريبي", "داخلي");
+  if (locale === "zh-CN") return localized.replaceAll("Demo 积分", "内部积分").replaceAll("Demo 余额", "账户余额").replaceAll("Demo 结算记录", "结算记录").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("本 Demo", "本版本").replaceAll("Demo 设备标识", "本地设备标识").replaceAll("Demo", "内部");
+  if (locale === "zh-TW") return localized.replaceAll("Demo 積分", "內部積分").replaceAll("Demo 餘額", "帳戶餘額").replaceAll("Demo 帳本", "帳本").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("本 Demo", "本版本").replaceAll("Demo", "內部");
+  return localized.replaceAll("Demo Credit", "Internal Credit").replaceAll("Demo ledger", "Internal ledger").replaceAll("Demo balance", "Account balance").replaceAll("Demo settlement record", "Settlement record").replaceAll("Telegram Demo", "Telegram Mini App").replaceAll("Demo device ID", "Local device ID").replaceAll("Demo", "Internal");
 }
 
 export function createTranslator(locale: Locale) {
