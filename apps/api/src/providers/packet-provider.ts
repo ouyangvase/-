@@ -1,6 +1,6 @@
 import { demoPacketValue } from "../../../../packages/game-engine/src/index.js";
 
-export type PacketProviderStatus = "DEMO_READY" | "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED";
+export type PacketProviderStatus = "READY" | "PROVIDER_NOT_CONFIGURED" | "REAL_MONEY_DISABLED";
 export type PacketClaimInput = { packetId: string; serverSeed: string; roundId: string; userId: string; claimSequence: number };
 export type PacketRecord = { id: string; provider: string; roundId: string; createdAt: string; totalAmount: number; maxClaims: number; claimedAmount: number; claimedCount: number; expiresAt: string; cancelledAt?: string };
 export type PacketClaim = { packetId: string; userId: string; value: number; claimedAt: string; claimSequence: number; label: string; totalAmount: number; maxClaims: number; claimedAmount: number; claimedCount: number; remainingAmount: number; remainingClaims: number };
@@ -29,7 +29,7 @@ export interface PacketProvider {
 
 export class DemoPacketProvider implements PacketProvider {
   readonly name = "InternalPacketProvider";
-  readonly status = "DEMO_READY" as const;
+  readonly status = "READY" as const;
   private readonly packets = new Map<string, PacketRecord>();
   private readonly claims = new Map<string, PacketClaim[]>();
 

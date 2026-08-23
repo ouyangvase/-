@@ -13,13 +13,24 @@ import { hashPin, validPin } from "./runtime-security.js";
 import { maskTngAccount } from "./verification-security.js";
 
 const port = Number(process.env.API_PORT ?? 8787);
-const appMode = process.env.APP_MODE ?? "demo";
+const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const telegramMockEnabled = appMode === "demo" && process.env.TELEGRAM_MOCK_ENABLED !== "false";
 const realMoneyDisabled = process.env.REAL_MONEY_ENABLED !== "true";
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? process.env.APP_VERSION ?? "0.1.0-demo";
 const buildId = process.env.NEXT_PUBLIC_BUILD_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "local";
 const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT ?? new Date().toISOString();
 const persistence = new ApiPersistence();
+const requiredProductionConfig = [
+  "DATABASE_URL",
+  "TELEGRAM_BOT_TOKEN",
+  "PROJECT12_SERVER_SEED",
+  "TELEGRAM_WEBHOOK_SECRET",
+  "SESSION_SECRET",
+  "ADMIN_SESSION_SECRET",
+  "DEVICE_TOKEN_SECRET",
+  "INTERNAL_WORKER_SECRET"
+] as const;
+function missingProductionConfig(): string[] { return appMode === "demo" ? [] : requiredProductionConfig.filter((name) => !process.env[name]?.trim()); }
 const sessions = new Map<string, { userId: string; role: "PLAYER" | "ADMIN"; expiresAt: number }>();
 const requestSessions = new WeakMap<IncomingMessage, { userId: string; role: "PLAYER" | "ADMIN" }>();
 const idempotency = new Map<string, unknown>();
@@ -42,7 +53,7 @@ const onboarding = new Map<string, { deviceBound: boolean; referrerBound: boolea
 const verificationStates = new Map<string, VerificationSnapshot>();
 const demoVerifiedUserId = "demo-player-01";
 const roomMessages: RoomMessage[] = [
-  { id: "MSG-0001", messageSeq: 1, type: "SYSTEM", body: "平台通知：本房间使用内部 Demo 红包，积分无现金价值。", createdAt: now(), payload: { pinned: true } },
+  { id: "MSG-0001", messageSeq: 1, type: "SYSTEM", body: "平台通知：本房间使用平台内部红包，只有本局下注玩家会收到领取入口。", createdAt: now(), payload: { pinned: true } },
   { id: "MSG-0002", messageSeq: 2, type: "ROUND", body: "平台通知：回合 R-0247 已开启，等待玩家抢庄。", createdAt: now(), payload: { roundId: "R-0247", pinned: true } },
   { id: "MSG-0003", messageSeq: 3, type: "BANKER", body: "平台通知：开始抢庄，玩家发送整数庄金，结束后最高者成为庄家。", createdAt: now(), payload: { templateKey: "game.banker.started", pinned: true } }
 ];
@@ -133,7 +144,7 @@ const demoAnnouncements = [
   { id: "announcement-2", title: "Fair round records", body: "Round events, packet claims and Demo ledger references are recorded by the server.", status: "PUBLISHED", createdAt: "2026-08-20T00:00:00.000Z" }
 ];
 function roomSummary() { return { id: "room-12", name: "Project 12 Social Table", players: state.round.players, state: state.round.state, roundId: state.round.id, banker: state.round.banker, bankPool: state.round.bankPool, endsAt: state.round.endsAt, minDemoCredit: 250 }; }
-function hallSnapshot() { return { room: roomSummary(), announcements: demoAnnouncements, games: [{ id: "12-niuniu", roomId: "room-12", name: "12牛牛", status: "OPEN", mode: "INTERNAL_PACKET_DEMO" }], demoOnly: appMode === "demo" }; }
+function hallSnapshot() { return { room: roomSummary(), announcements: demoAnnouncements, games: [{ id: "12-niuniu", roomId: "room-12", name: "12牛牛", status: "OPEN", mode: "INTERNAL_PACKET" }], demoOnly: appMode === "demo" }; }
 function roomLeaderboard(category: "points" | "cards" | "banker") {
   const activeBids = bankerBids.get(state.round.id) ?? [];
   const bidCounts = new Map(activeBids.map((bid) => [bid.userId, bid.amount]));
@@ -507,7 +518,7 @@ async function startNextRound(actor: string) {
 }
 async function executePacketClaim(identity: { userId: string }, key: string) {
   if (!realMoneyDisabled) throw new Error("Unexpected money mode");
-  if (packetProvider.status !== "DEMO_READY") throw new Error(`Packet provider unavailable: ${packetProvider.name}`);
+  if (packetProvider.status !== "READY") throw new Error(`Packet provider unavailable: ${packetProvider.name}`);
   if (!["CLAIMING", "EVALUATING"].includes(state.round.state)) throw new Error("Claim window is closed");
   const bettorRows = await roundBettorRows();
   const bettorIds = bettorRows.map((row) => row.userId);
@@ -777,7 +788,7 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
     await advanceDemoRoundIfDue();
     if (request.method === "GET" && healthPath === "/health/live") return json(response, 200, { ok: true, service: "api", mode: appMode });
     if (request.method === "GET" && healthPath === "/health/worker") { const worker = await workerHealth(); return json(response, worker.status === "unavailable" ? 503 : 200, { ok: worker.status !== "unavailable", service: "worker", ...worker }); }
-    if (request.method === "GET" && (healthPath === "/health/ready" || healthPath === "/health")) { const databaseHealth = await persistence.health(); const worker = await workerHealth(); const botConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN); const workerRequired = process.env.REQUIRE_WORKER === "true"; const internalChat = persistence.configured ? "configured" : "demo-only"; const ready = appMode === "demo" ? true : databaseHealth === "healthy" && botConfigured && (!workerRequired || worker.status === "healthy"); return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, services: { api: ready ? "healthy" : "degraded", worker: worker.status, workerRequired, bot: botConfigured ? "configured" : "blocked", internalChat, legacyNativeGroupChat: "disabled_by_architecture", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
+    if (request.method === "GET" && (healthPath === "/health/ready" || healthPath === "/health")) { const databaseHealth = await persistence.health(); const worker = await workerHealth(); const botConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN); const workerRequired = process.env.REQUIRE_WORKER === "true"; const missingConfig = missingProductionConfig(); const internalChat = persistence.configured ? "configured" : appMode === "demo" ? "demo-only" : "not_configured"; const ready = appMode === "demo" ? true : missingConfig.length === 0 && databaseHealth === "healthy" && botConfigured && (!workerRequired || worker.status === "healthy"); return json(response, ready ? 200 : 503, { ok: ready, mode: appMode, realMoneyDisabled, missingConfig, services: { api: ready ? "healthy" : "blocked", worker: worker.status, workerRequired, bot: botConfigured ? "configured" : "not_configured", internalChat, legacyNativeGroupChat: "disabled_by_architecture", ledger: "balanced", packetProvider: packetProvider.status, database: databaseHealth }, auth: { telegramSignedDataRequiredOutsideDemo: true, mockEnabled: telegramMockEnabled } }); }
 
     if (request.method === "POST" && url.pathname === "/api/auth/telegram") { if (appMode !== "demo" && !persistence.configured) return json(response, 503, { code: "DATABASE_REQUIRED", error: "Persistent authentication storage is not configured" }); const data = await body(request); let identity: { userId: string; username?: string }; let mode: "telegram-verified" | "mock"; if (process.env.TELEGRAM_BOT_TOKEN && typeof data.initData === "string" && data.initData.trim()) { identity = validateTelegramInitData(data.initData, process.env.TELEGRAM_BOT_TOKEN, Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS ?? 86400)); mode = "telegram-verified"; } else if (typeof data.launchToken === "string" && data.launchToken.trim()) { const launchUserId = await persistence.consumeWebAppLaunchGrant(data.launchToken.trim()); if (!launchUserId) return json(response, 401, { code: "INVALID_LAUNCH_GRANT", error: "This Telegram launch button has expired or was already used" }); identity = { userId: launchUserId }; mode = "telegram-verified"; } else if (telegramMockEnabled) { identity = { userId: typeof data.demoUser === "string" ? data.demoUser : "demo-player-01", username: "demo_player" }; mode = "mock"; } else return json(response, 503, { code: "TELEGRAM_SIGNED_INIT_DATA_REQUIRED", error: "Signed Telegram initData or a valid Telegram launch grant is required outside demo mode" }); const locale = normalizeAppLocale(data.locale); const expiresAt = Date.now() + 86_400_000; const token = appMode === "demo" && !persistence.configured ? createDemoSessionToken(identity.userId, expiresAt) : randomBytes(32).toString("hex"); sessions.set(token, { userId: identity.userId, role: "PLAYER", expiresAt }); preferredLocales.set(identity.userId, locale); await persistence.upsertTelegramIdentity(identity.userId, identity.username, mode === "telegram-verified", locale); await persistence.createSession(identity.userId, token, new Date(expiresAt)); const startParam = typeof data.startParam === "string" ? data.startParam.trim() : ""; const pendingReferral = startParam.replace(/^ref_/, ""); const onboardingEntry = onboardingState(identity.userId); if (pendingReferral) onboardingEntry.pendingReferral = pendingReferral; const secureSession = appMode !== "demo" || process.env.NODE_ENV === "production"; response.setHeader("set-cookie", `p12_session=${token}; HttpOnly; SameSite=${secureSession ? "None" : "Lax"}; Path=/; Max-Age=86400${secureSession ? "; Secure" : ""}`); return json(response, 200, { token: appMode === "demo" ? token : undefined, mode, locale, user: { id: identity.userId, username: identity.username }, startParam, session: "HttpOnly cookie", persistence: persistence.configured ? "postgres" : "memory-demo-fallback" }); }
     if (request.method === "GET" && url.pathname === "/api/preferences/locale") { const identity = requirePlayer(request, response); if (!identity) return undefined; const persisted = preferredLocales.get(identity.userId) ?? await persistence.loadUserLocale(identity.userId); const locale = normalizeAppLocale(persisted); preferredLocales.set(identity.userId, locale); return json(response, 200, { locale }); }

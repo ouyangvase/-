@@ -10,7 +10,7 @@ type DemoRoundState = "LOBBY" | "BANKER_BIDDING" | "BETTING" | "WAITING_BANKER_C
 
 const pollIntervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 1000);
 const heartbeatIntervalMs = Number(process.env.WORKER_HEARTBEAT_INTERVAL_MS ?? 15_000);
-const appMode = process.env.APP_MODE ?? "demo";
+const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const database = new Project12Database();
 const workerId = `${process.env.HOSTNAME ?? "local"}-${randomBytes(6).toString("hex")}`;
 const locks = new Set<string>();

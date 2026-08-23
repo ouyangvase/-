@@ -77,7 +77,7 @@ export class ApiPersistence implements PacketStore {
 
   constructor(database = new Project12Database()) {
     this.database = database;
-    this.strict = (process.env.APP_MODE ?? "demo") !== "demo";
+    this.strict = (process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production")) !== "demo";
   }
 
   get configured(): boolean { return this.database.configured; }

@@ -6,7 +6,7 @@ type DueRound = { id: string; state: RoundState; state_version: number; state_en
 type InternalPacketRow = { id: string; total_amount: string | number; max_claims: string | number; claimed_amount: string | number; claimed_count: string | number };
 type SettlementLine = { account: "USER_LOCKED" | "BANKER_POOL" | "USER_AVAILABLE" | "PLATFORM_FEE"; direction: "DEBIT" | "CREDIT"; amount: number; reason: string };
 
-const appMode = process.env.APP_MODE ?? "demo";
+const appMode = process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
 const configuredServerSeed = process.env.PROJECT12_SERVER_SEED ?? (appMode === "demo" ? "project12-demo-seed-247" : "");
 
 function workerServerSeed(): string {
