@@ -347,7 +347,6 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
   }, [apiUrl, sessionToken]);
 
   useEffect(() => {
-    if (connection === "connected") return;
     let disposed = false;
     const poll = async () => {
       const cursor = latestMessageSeqRef.current;
@@ -367,7 +366,7 @@ export function ChatRoomScreen({ state, apiUrl, sessionToken, locale, onBack, on
     void poll();
     const timer = window.setInterval(() => { void poll(); }, 3000);
     return () => { disposed = true; window.clearInterval(timer); };
-  }, [apiUrl, sessionToken, connection]);
+  }, [apiUrl, sessionToken]);
 
   useEffect(() => { if (!firstLoadRef.current || messages.length === 0) return; firstLoadRef.current = false; window.requestAnimationFrame(() => { scrollToLatest(); markRead(); }); }, [messages.length]);
 
