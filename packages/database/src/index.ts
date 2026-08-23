@@ -5,13 +5,28 @@ const { Pool } = pg;
 
 export type QueryExecutor = Pick<PoolClient, "query">;
 
+function normalizeConnectionString(connectionString: string) {
+  if (!/\.pooler\.supabase\.com(?::|\/)/i.test(connectionString)) return connectionString;
+  if (/[?&]sslmode=/i.test(connectionString)) {
+    return connectionString.replace(/([?&]sslmode=)require(?=(&|$))/i, "$1no-verify");
+  }
+  return `${connectionString}${connectionString.includes("?") ? "&" : "?"}sslmode=no-verify`;
+}
+
+function poolOptions(connectionString: string, max: number) {
+  return {
+    connectionString: normalizeConnectionString(connectionString),
+    max,
+  };
+}
+
 export class Project12Database {
   readonly configured: boolean;
   private readonly pool: PgPool | undefined;
 
   constructor(connectionString = process.env.DATABASE_URL) {
     this.configured = Boolean(connectionString);
-    this.pool = connectionString ? new Pool({ connectionString, max: 10 }) : undefined;
+    this.pool = connectionString ? new Pool(poolOptions(connectionString, 10)) : undefined;
   }
 
   async query<T extends QueryResultRow = QueryResultRow>(text: string, values: unknown[] = []): Promise<T[]> {

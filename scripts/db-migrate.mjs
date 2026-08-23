@@ -21,7 +21,15 @@ if (!psqlProbe.error && psqlProbe.status === 0) {
     console.log(`Migration complete: ${file}`);
   }
 } else {
-  const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
+  const normalizedDatabaseUrl = /\.pooler\.supabase\.com(?::|\/)/i.test(databaseUrl)
+    ? /[?&]sslmode=/i.test(databaseUrl)
+      ? databaseUrl.replace(/([?&]sslmode=)require(?=(&|$))/i, "$1no-verify")
+      : `${databaseUrl}${databaseUrl.includes("?") ? "&" : "?"}sslmode=no-verify`
+    : databaseUrl;
+  const pool = new pg.Pool({
+    connectionString: normalizedDatabaseUrl,
+    max: 1
+  });
   try {
     for (const file of files) {
       const sql = await import("node:fs/promises").then(({ readFile }) => readFile(file, "utf8"));
