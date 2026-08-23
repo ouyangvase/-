@@ -162,11 +162,15 @@ function PacketMessage({ message, locale, claimable }: { message: ChatMessage; l
 
 function Scoreboard({ message, text, locale }: { message: ChatMessage; text: string; locale: Locale }) {
   const rows = Array.isArray(message.payload?.results) ? message.payload?.results as Array<Record<string, unknown>> : [];
+  const bankerHand = message.payload?.bankerHand && typeof message.payload.bankerHand === "object" ? message.payload.bankerHand as Record<string, unknown> : undefined;
+  const bankerName = typeof message.payload?.banker === "string" ? message.payload.banker : "庄家";
+  const bankerAmount = typeof message.payload?.bankerAmount === "string" || typeof message.payload?.bankerAmount === "number" ? String(message.payload.bankerAmount) : undefined;
+  const bankerCards = Array.isArray(message.payload?.bankerCards) ? message.payload.bankerCards.map(String).join(" · ") : undefined;
   const [showAll, setShowAll] = useState(false);
   const visibleRows = showAll ? rows : rows.slice(0, 6);
   const outcomeLabel: Record<string, string> = { WIN: "赢", LOSE: "输", TIE: "平", WATERED: "退回" };
   const money = (value: unknown) => typeof value === "number" ? value.toFixed(2) : "—";
-  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>成绩</small></span><div className="chat-structured-bubble"><strong>本局成绩 · 已自动算牌结算</strong>{visibleRows.length > 0 ? <div className="chat-scoreboard-rows">{visibleRows.map((row, index) => {
+  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>成绩</small></span><div className="chat-structured-bubble"><strong>本局成绩 · 已自动算牌结算</strong>{bankerHand && <div className="chat-scoreboard-banker"><span><small>庄家</small><b>{bankerName}</b></span><span><small>庄家牌型</small><b>{String(bankerHand.type ?? "普通点数")}{String(bankerHand.points ?? "—")}</b></span><span><small>牌面</small><b>{bankerAmount ?? "—"}{bankerCards ? ` · ${bankerCards}` : ""}</b></span></div>}{visibleRows.length > 0 ? <div className="chat-scoreboard-rows">{visibleRows.map((row, index) => {
     const hand = row.hand && typeof row.hand === "object" ? row.hand as Record<string, unknown> : {};
     const outcome = typeof row.outcome === "string" ? row.outcome : "SETTLED";
     const netReward = typeof row.netReward === "number" ? row.netReward : 0;

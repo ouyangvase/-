@@ -279,6 +279,10 @@ body { overflow-x: hidden; background: #000; }
 .chat-packet-beige small { margin-top: 4px; color: #8f745d; }
 .chat-structured-bubble { width: min(330px, 82vw); padding: 13px 13px 10px; }
 .chat-structured-bubble > strong { color: #f0c875; font-size: 15px; }
+.chat-scoreboard-banker { display: grid; gap: 7px; margin-top: 11px; padding: 10px 0; border-top: 1px solid rgba(240,200,117,.25); border-bottom: 1px solid rgba(255,255,255,.07); }
+.chat-scoreboard-banker span { display: flex; justify-content: space-between; gap: 10px; color: rgba(241,239,232,.78); font-size: 12px; }
+.chat-scoreboard-banker small { color: rgba(241,239,232,.5); }
+.chat-scoreboard-banker b { color: #f0c875; text-align: right; }
 .chat-scoreboard-rows { display: grid; gap: 7px; margin-top: 11px; }
 .chat-score-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 7px; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.07); color: rgba(241,239,232,.88); font-size: 12px; }
 .chat-score-row:last-child { border-bottom: 0; }
