@@ -133,22 +133,38 @@ async function writeHeartbeat(): Promise<void> {
   await database.query("INSERT INTO worker_heartbeats (worker_id, status, heartbeat_at) VALUES ($1, 'healthy', now()) ON CONFLICT (worker_id) DO UPDATE SET status = 'healthy', heartbeat_at = now()", [workerId]);
 }
 
-async function pollOutbox(): Promise<void> {
+async function pollOutbox(): Promise<number> {
+  let published = 0;
   for (const row of await claimDatabaseOutbox()) {
-    try { await publishDatabaseOutbox(row); }
-    catch (error) { await failDatabaseOutbox(row, error); console.error(JSON.stringify({ service: "worker", action: "outbox_delivery_failed", outbox_id: row.id, error: error instanceof Error ? error.message : "unknown" })); }
+    try {
+      await publishDatabaseOutbox(row);
+      published += 1;
+    } catch (error) {
+      await failDatabaseOutbox(row, error);
+      console.error(JSON.stringify({ service: "worker", action: "outbox_delivery_failed", outbox_id: row.id, error: error instanceof Error ? error.message : "unknown" }));
+    }
   }
+  return published;
 }
 
-async function pollRounds(): Promise<void> {
+async function pollRounds(): Promise<number> {
   const advanced = await advanceExpiredRounds(database, workerId);
   if (advanced > 0) console.log(JSON.stringify({ service: "worker", action: "rounds_advanced", count: advanced, worker_id: workerId }));
+  return advanced;
+}
+
+export async function runWorkerTick(): Promise<{ advanced: number; outboxPublished: number }> {
+  if (appMode !== "demo" && !database.configured) throw new Error("DATABASE_REQUIRED: Worker cannot run outside demo without DATABASE_URL");
+  await writeHeartbeat();
+  const firstPublished = await pollOutbox();
+  const advanced = await pollRounds();
+  const secondPublished = await pollOutbox();
+  return { advanced, outboxPublished: firstPublished + secondPublished };
 }
 
 export async function startWorker(): Promise<void> {
   if (appMode !== "demo" && !database.configured) throw new Error("DATABASE_REQUIRED: Worker cannot start outside demo without DATABASE_URL");
-  await writeHeartbeat();
-  await pollRounds();
+  await runWorkerTick();
   console.log(JSON.stringify({ service: "worker", mode: appMode, status: database.configured ? "ready" : "MOCK_ONLY", worker_id: workerId }));
   const heartbeatTimer = setInterval(() => { void writeHeartbeat().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "heartbeat_failed", error: error instanceof Error ? error.message : "unknown" }))); }, heartbeatIntervalMs);
   const pollTimer = setInterval(() => { void Promise.all([pollOutbox(), pollRounds()]).catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);

@@ -11,7 +11,7 @@ import { createPacketProvider, PacketProviderError } from "./providers/packet-pr
 import { ApiPersistence, type RoomMessage, type VerificationSnapshot } from "./persistence.js";
 import { hashPin, validPin } from "./runtime-security.js";
 import { maskTngAccount } from "./verification-security.js";
-import { advanceExpiredRounds } from "../../worker/src/round-advancer.js";
+import { runWorkerTick } from "../../worker/src/worker.js";
 
 const port = Number(process.env.API_PORT ?? 8787);
 const appMode = process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production");
@@ -765,7 +765,8 @@ async function workerHealth(): Promise<{ status: "healthy" | "mock" | "unavailab
   const heartbeat = await persistence.latestWorkerHeartbeat();
   if (!heartbeat) return { status: "unavailable" };
   const age = Date.now() - Date.parse(heartbeat.heartbeatAt);
-  return age <= Number(process.env.WORKER_HEARTBEAT_TIMEOUT_MS ?? 45_000) ? { status: "healthy", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt } : { status: "unavailable", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt };
+  const defaultTimeoutMs = process.env.VERCEL === "1" ? 90_000 : 45_000;
+  return age <= Number(process.env.WORKER_HEARTBEAT_TIMEOUT_MS ?? defaultTimeoutMs) ? { status: "healthy", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt } : { status: "unavailable", workerId: heartbeat.workerId, heartbeatAt: heartbeat.heartbeatAt };
 }
 
 function telegramUpdateType(update: Record<string, unknown>): "message" | "callback_query" | "my_chat_member" | "unknown" {
@@ -819,8 +820,8 @@ export const apiHandler = async (request: IncomingMessage, response: ServerRespo
       if (!persistence.configured) return json(response, 503, { code: "DATABASE_REQUIRED", error: "Persistent round storage is not configured" });
       if (!process.env.PROJECT12_SERVER_SEED?.trim()) return json(response, 503, { code: "SERVER_SEED_REQUIRED", error: "Production server seed is not configured" });
       const workerId = `vercel-cron-${buildId.slice(0, 12)}`;
-      const advanced = await advanceExpiredRounds(persistence.databaseClient, workerId, 20);
-      return json(response, 200, { ok: true, mode: appMode, workerId, advanced });
+      const tick = await runWorkerTick();
+      return json(response, 200, { ok: true, mode: appMode, workerId, ...tick });
     }
     const activeSession = await resolveSession(request);
     const runtime = persistence.configured && activeSession ? createRequestRuntime() : fallbackRuntime;
