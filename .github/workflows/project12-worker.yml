@@ -1,0 +1,40 @@
+name: Project 12 durable worker
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub Actions supports a five-minute minimum for scheduled workflows.
+    - cron: "*/5 * * * *"
+
+concurrency:
+  group: project12-durable-worker
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      APP_MODE: staging
+      DATABASE_URL: ${{ secrets.PROJECT12_DATABASE_URL }}
+      SUPABASE_URL: ${{ secrets.PROJECT12_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PROJECT12_SUPABASE_SERVICE_ROLE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.PROJECT12_TELEGRAM_BOT_TOKEN }}
+      PROJECT12_SERVER_SEED: ${{ secrets.PROJECT12_SERVER_SEED }}
+      WORKER_POLL_INTERVAL_MS: "1000"
+      WORKER_RUN_FOR_MS: "210000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable && corepack prepare pnpm@11.19.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run worker window
+        run: pnpm --filter @project12/worker start

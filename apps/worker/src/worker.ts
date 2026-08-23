@@ -152,9 +152,20 @@ export async function startWorker(): Promise<void> {
   console.log(JSON.stringify({ service: "worker", mode: appMode, status: database.configured ? "ready" : "MOCK_ONLY", worker_id: workerId }));
   const heartbeatTimer = setInterval(() => { void writeHeartbeat().catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "heartbeat_failed", error: error instanceof Error ? error.message : "unknown" }))); }, heartbeatIntervalMs);
   const pollTimer = setInterval(() => { void Promise.all([pollOutbox(), pollRounds()]).catch((error: unknown) => console.error(JSON.stringify({ service: "worker", action: "poll_failed", error: error instanceof Error ? error.message : "unknown" }))); }, pollIntervalMs);
-  const stop = () => { clearInterval(heartbeatTimer); clearInterval(pollTimer); void database.close(); };
+  let stopped = false;
+  let runTimer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(heartbeatTimer);
+    clearInterval(pollTimer);
+    if (runTimer) clearTimeout(runTimer);
+    void database.close();
+  };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
+  const runForMs = Number(process.env.WORKER_RUN_FOR_MS ?? 0);
+  if (Number.isFinite(runForMs) && runForMs > 0) runTimer = setTimeout(stop, runForMs);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
