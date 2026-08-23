@@ -38,6 +38,19 @@ export type UserRuntimeSnapshot = {
 export type VerificationStatus = "NOT_SUBMITTED" | "PENDING" | "APPROVED" | "REJECTED" | "NEEDS_MORE_INFO" | "SUSPENDED";
 export type VerificationSnapshot = { status: VerificationStatus; submittedAt?: string; tngAccountLast4?: string; rejectionReason?: string };
 export type VerificationCaseSnapshot = VerificationSnapshot & { telegramUserId: string; legalName?: string; tngAccountMasked?: string };
+export type PersistedRoundResult = {
+  userId: string;
+  betAmount: number;
+  packetValue: number;
+  hand: { type: string; points: number };
+  outcome?: "WIN" | "LOSE" | "TIE" | "WATERED";
+  multiplier: number;
+  grossReward: number;
+  fee: number;
+  netReward: number;
+  bankerPoolBefore: number;
+  bankerPoolAfter: number;
+};
 export type RoomMessage = {
   id: string;
   messageSeq?: number;
@@ -73,11 +86,12 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 export class ApiPersistence implements PacketStore {
   private readonly database: Project12Database;
   private readonly strict: boolean;
-  private currentRoundId = process.env.DEMO_ROUND_DB_ID ?? defaultRoundId;
+  private currentRoundId: string;
 
   constructor(database = new Project12Database()) {
     this.database = database;
     this.strict = (process.env.NODE_ENV === "production" ? "production" : process.env.APP_MODE ?? (process.env.NODE_ENV === "test" ? "demo" : "production")) !== "demo";
+    this.currentRoundId = this.strict ? "" : process.env.DEMO_ROUND_DB_ID ?? defaultRoundId;
   }
 
   get configured(): boolean { return this.database.configured; }
@@ -87,7 +101,10 @@ export class ApiPersistence implements PacketStore {
   get roundDatabaseId(): string { return this.currentRoundId; }
 
   private databaseRoundId(roundId?: string): string {
-    return roundId && uuidPattern.test(roundId) ? roundId : this.roundDatabaseId;
+    const value = roundId && uuidPattern.test(roundId) ? roundId : this.roundDatabaseId;
+    if (!this.configured && !this.strict) return value || defaultRoundId;
+    if (!uuidPattern.test(value)) throw new Error("ROUND_NOT_READY: no active production round");
+    return value;
   }
 
   async health(): Promise<"disabled" | "healthy" | "unavailable"> {
@@ -451,13 +468,10 @@ export class ApiPersistence implements PacketStore {
     if (!this.configured) return undefined;
     const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_user_id?: string; banker_pool: string | number }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, r.banker_user_id,
       COALESCE((SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL'), 0) AS banker_pool
-      FROM rounds r
-      WHERE r.id = COALESCE(
-        (SELECT gr.active_round_id FROM game_rooms gr
-          JOIN rounds seed_round ON seed_round.room_id = gr.id
-          WHERE seed_round.id = $1::uuid),
-        $1::uuid
-      )`, [this.roundDatabaseId]);
+      FROM game_rooms gr JOIN rounds r ON r.id = gr.active_round_id
+      WHERE gr.status = 'OPEN'
+      ORDER BY r.state_started_at DESC
+      LIMIT 1`);
     const row = rows[0];
     if (!row) return undefined;
     this.currentRoundId = row.round_id;
@@ -473,7 +487,28 @@ export class ApiPersistence implements PacketStore {
   }
 
   async persistReferral(telegramUserId: string, code: string, source: string): Promise<void> {
-    await this.run(() => this.database.query("INSERT INTO referral_edges (referrer_user_id, referred_user_id, referral_code, source) SELECT rc.user_id, ti.user_id, rc.code, $3 FROM referral_codes rc CROSS JOIN telegram_identities ti WHERE rc.code = $1 AND ti.telegram_user_id = $2 ON CONFLICT (referred_user_id) DO NOTHING", [code === "DEMO-INVITE" ? "P12-DEMO-01" : code, telegramUserId, source]).then(() => undefined));
+    const normalizedCode = code.trim();
+    if (this.strict && /demo/i.test(normalizedCode)) throw new Error("REFERRAL_CODE_INVALID");
+    await this.run(() => this.database.query("INSERT INTO referral_edges (referrer_user_id, referred_user_id, referral_code, source) SELECT rc.user_id, ti.user_id, rc.code, $3 FROM referral_codes rc CROSS JOIN telegram_identities ti WHERE rc.code = $1 AND ti.telegram_user_id = $2 ON CONFLICT (referred_user_id) DO NOTHING", [normalizedCode, telegramUserId, source]).then(() => undefined));
+  }
+
+  async loadRoundResults(roundId?: string): Promise<PersistedRoundResult[]> {
+    if (!this.configured) return [];
+    const rows = await this.database.query<{ user_id: string; bet_amount: string | number; packet_value: string | number; hand_type: string; hand_points: number; outcome?: PersistedRoundResult["outcome"]; multiplier: string | number; gross_reward: string | number; fee: string | number; net_reward: string | number; banker_pool_before: string | number; banker_pool_after: string | number }>(`SELECT user_id::text AS user_id, bet_amount, packet_value, hand_type, hand_points, outcome, multiplier, gross_reward, fee, net_reward, banker_pool_before, banker_pool_after
+      FROM round_results WHERE round_id = $1 ORDER BY created_at, id`, [this.databaseRoundId(roundId)]);
+    return rows.map((row) => ({
+      userId: row.user_id,
+      betAmount: Number(row.bet_amount),
+      packetValue: Number(row.packet_value),
+      hand: { type: row.hand_type, points: Number(row.hand_points) },
+      ...(row.outcome ? { outcome: row.outcome } : {}),
+      multiplier: Number(row.multiplier),
+      grossReward: Number(row.gross_reward),
+      fee: Number(row.fee),
+      netReward: Number(row.net_reward),
+      bankerPoolBefore: Number(row.banker_pool_before),
+      bankerPoolAfter: Number(row.banker_pool_after)
+    }));
   }
 
   async persistBankerBid(telegramUserId: string, amount: number, roundId?: string): Promise<void> {

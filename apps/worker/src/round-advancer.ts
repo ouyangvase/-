@@ -249,10 +249,23 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     await insertStateEvent(client, row.id, "EVALUATING", "SETTLING", Number(settling.rows[0].state_version), workerId, { automated: true, reason: "evaluation deadline elapsed" });
     for (const player of players.rows) {
       const packetValue = Number(player.packet_value);
+      const betAmount = Number(player.bet_amount);
+      const bankerPoolBefore = bankerPool;
       const settlement = await postSettlement(client, row.id, player.user_id, Number(player.bet_amount), packetValue, bankerHand, bankerPool);
       if (settlement.posted) bankerPool = settlement.result.bankerPoolAfter;
-      const hand = classifyPacket(packetValue.toFixed(2)).hand;
-      results.push(`${player.display_name} · ${hand.type} ${hand.points}点 · ${settlement.result.outcome} · ${Number(player.bet_amount)} PT`);
+      const packet = classifyPacket(packetValue.toFixed(2));
+      const hand = packet.hand;
+      await client.query(`INSERT INTO round_results
+        (round_id, user_id, role, bet_amount, packet_value, hand_type, hand_points, cards, outcome, multiplier, gross_reward, fee, net_reward, banker_pool_before, banker_pool_after)
+        VALUES ($1, $2, 'PLAYER', $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)
+        ON CONFLICT (round_id, user_id) DO UPDATE SET bet_amount = EXCLUDED.bet_amount, packet_value = EXCLUDED.packet_value,
+          hand_type = EXCLUDED.hand_type, hand_points = EXCLUDED.hand_points, cards = EXCLUDED.cards, outcome = EXCLUDED.outcome,
+          multiplier = EXCLUDED.multiplier, gross_reward = EXCLUDED.gross_reward, fee = EXCLUDED.fee, net_reward = EXCLUDED.net_reward,
+          banker_pool_before = EXCLUDED.banker_pool_before, banker_pool_after = EXCLUDED.banker_pool_after`, [
+        row.id, player.user_id, betAmount, packetValue, hand.type, hand.points, JSON.stringify(packet.digits.slice(-3)), settlement.result.outcome,
+        settlement.result.multiplier, settlement.result.grossReward, settlement.result.fee, settlement.result.netReward, bankerPoolBefore, settlement.result.bankerPoolAfter
+      ]);
+      results.push(`${player.display_name} · ${hand.type} ${hand.points}点 · ${settlement.result.outcome} · ${betAmount} PT`);
     }
     await client.query(`INSERT INTO banker_pools (round_id, amount) VALUES ($1, $2)
       ON CONFLICT (round_id) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now()`, [row.id, bankerPool]);

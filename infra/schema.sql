@@ -1,5 +1,5 @@
--- PROJECT 12 demo schema.
--- Wallet amounts are demo points with up to two decimal places. No table represents fiat or crypto money.
+-- PROJECT 12 production schema.
+-- Wallet amounts are internal points with up to two decimal places. No table represents fiat or crypto money.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -164,6 +164,17 @@ CREATE TABLE IF NOT EXISTS settlement_lines (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), settlement_id uuid NOT NULL REFERENCES settlements(id), account_type text NOT NULL,
   direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')), amount numeric(20,2) NOT NULL CHECK (amount > 0), reason text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS round_results (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), round_id uuid NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, role text NOT NULL DEFAULT 'PLAYER' CHECK (role IN ('PLAYER', 'BANKER')),
+  bet_amount numeric(20,2) NOT NULL DEFAULT 0, packet_value numeric(20,2) NOT NULL DEFAULT 0,
+  hand_type text NOT NULL, hand_points int NOT NULL CHECK (hand_points BETWEEN 0 AND 10), cards jsonb NOT NULL DEFAULT '[]'::jsonb,
+  outcome text CHECK (outcome IN ('WIN', 'LOSE', 'TIE', 'WATERED')), multiplier numeric(20,4) NOT NULL DEFAULT 0,
+  gross_reward numeric(20,2) NOT NULL DEFAULT 0, fee numeric(20,2) NOT NULL DEFAULT 0, net_reward numeric(20,2) NOT NULL DEFAULT 0,
+  banker_pool_before numeric(20,2) NOT NULL DEFAULT 0, banker_pool_after numeric(20,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(round_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_round_results_round ON round_results(round_id, created_at);
 
 CREATE TABLE IF NOT EXISTS wallet_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), account_type text NOT NULL CHECK (account_type IN ('USER_AVAILABLE', 'USER_LOCKED', 'USER_LOCKED_BANKER_POOL', 'BANKER_POOL', 'PLATFORM_FEE', 'DEMO_GRANTS', 'CAMPAIGN_REWARD_RESERVE', 'PENDING_ADJUSTMENT')),
