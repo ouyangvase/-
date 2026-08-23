@@ -1,5 +1,5 @@
 {
-  "verifiedAt": "2026-08-23T10:22:24.000Z",
+  "verifiedAt": "2026-08-23T11:27:11.000Z",
   "project": {
     "name": "project-12-demo-staging-public",
     "projectId": "prj_Sg31vMbgKRiyjfrkN1uWWWjykxDD",
@@ -7,11 +7,11 @@
   },
   "stableMiniAppUrl": "https://project-12-demo-staging-public.vercel.app",
   "productionDeployment": {
-    "id": "dpl_AiBANCPGRohHtc1WVNnQ6CgsGxhx",
-    "url": "https://project-12-demo-staging-public-80ntsa13q-tomupros-projects.vercel.app",
+    "id": "dpl_8Cg6t4SxSAkSwMaadPAiGAj9RBgD",
+    "url": "https://project-12-demo-staging-public-ahknekrr9-tomupros-projects.vercel.app",
     "target": "production",
     "status": "READY",
-    "commit": "ff7813b1960c2430f117b215ed65a935a0e346e7"
+    "commit": "026c09948bdfcac961bcf89c45618744399aed4b"
   },
   "checks": {
     "rootHttpStatus": 200,
@@ -20,7 +20,7 @@
     "apiCacheControl": "no-store, no-cache, must-revalidate",
     "assetCacheControl": "public, max-age=31536000, immutable",
     "version": "0.1.0-demo",
-    "buildId": "ff7813b1960c2430f117b215ed65a935a0e346e7"
+    "buildId": "026c09948bdfcac961bcf89c45618744399aed4b"
   },
   "runtimeTruth": {
     "mode": "demo",
