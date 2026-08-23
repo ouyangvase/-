@@ -190,9 +190,9 @@ const timedCandidates: Partial<Record<RoundState, RoundState>> = {
 
 const nextStateDurationSeconds: Partial<Record<RoundState, number>> = {
   BANKER_BIDDING: 30,
-  BETTING: 30,
+  BETTING: 50,
   WAITING_BANKER_CONFIRM: 60,
-  CLAIMING: 45,
+  CLAIMING: 15,
   EVALUATING: 10,
   SETTLING: 15
 };

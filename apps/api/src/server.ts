@@ -245,7 +245,7 @@ function publishSupabaseRoomBroadcast(event: RoomMessage): void {
   if (!supabaseUrl || !serviceKey) return;
   void fetch(`${supabaseUrl}/realtime/v1/api/broadcast?private=true`, { method: "POST", headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ topic: "room-12", event: "message", payload: { message: event } }] }) }).catch((error: unknown) => console.error(`supabase realtime broadcast failed: ${error instanceof Error ? error.message : String(error)}`));
 }
-function stateDeadline(to: RoundState): Date | null { const seconds: Partial<Record<RoundState, number>> = { BANKER_BIDDING: 30, BETTING: 30, WAITING_BANKER_CONFIRM: 60, CLAIMING: 45, EVALUATING: 10, SETTLING: 15 }; return seconds[to] === undefined ? null : new Date(Date.now() + seconds[to]! * 1000); }
+function stateDeadline(to: RoundState): Date | null { const seconds: Partial<Record<RoundState, number>> = { BANKER_BIDDING: 30, BETTING: 50, WAITING_BANKER_CONFIRM: 60, CLAIMING: 15, EVALUATING: 10, SETTLING: 15 }; return seconds[to] === undefined ? null : new Date(Date.now() + seconds[to]! * 1000); }
 async function transition(to: RoundState, actor: string, payload: Record<string, unknown> = {}) {
   const from = state.round.state;
   assertTransition(from, to);
@@ -454,7 +454,7 @@ async function executeConfirmPacket(identity: { userId: string }, key: string) {
     await addRoomMessage("PACKET_CARD", "平台内部红包已发放给本局参与者。", { packetId: packet.id, roundId: state.round.id, amount: packet.totalAmount, maxClaims: packet.maxClaims }, undefined, "TARGET_USER", bettor.userId);
     queueOutbox("ROUND_PACKET_AVAILABLE", { notificationId: `packet:${state.round.id}:${packet.id}:${bettor.userId}`, roundId: state.round.id, packetId: packet.id, amount: packet.totalAmount, maxClaims: packet.maxClaims, recipients: [bettor.userId] });
   }
-  state.round.endsAt = "00:45";
+  state.round.endsAt = "00:15";
   audit(identity.userId, "BANKER_PACKET_CONFIRMED", "ROUND", state.round.id, undefined, { packetId: packet.id, bettorCount: bettorRows.length, amount: packet.totalAmount });
   return { state: state.round.state, packet, bettorCount: bettorRows.length, bettingClosed: true };
 }
@@ -524,7 +524,7 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
     await transition("EVALUATING", identity.userId, { claimSequence: claim.claimSequence, claimedAt: claim.claimedAt, idempotencyKey: key });
     results = await publishRoundResults(state.round.id, packetId, bettorRows, claims.map((item) => ({ userId: item.userId, value: item.value })));
   }
-  state.round.endsAt = allClaimed ? "Done" : "00:45";
+  state.round.endsAt = allClaimed ? "Done" : "00:15";
   const bankerRound = demoRoundHand(serverSeed, state.round.id);
   const hand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
   audit(identity.userId, "INTERNAL_PACKET_CLAIMED", "ROUND", state.round.id, undefined, { ...claim, allClaimed, claimedCount: claims.length });
