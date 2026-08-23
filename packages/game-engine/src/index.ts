@@ -100,6 +100,13 @@ export function demoPacketValue(serverSeed: string, roundId: string, userId: str
   return min + (number % (max - min + 1));
 }
 
+export function demoRoundHand(serverSeed: string, roundId: string): { amount: string; digits: number[]; hand: { type: HandType; points: number } } {
+  const value = demoPacketValue(serverSeed, roundId, "__BANKER__", 0, 0, 999);
+  const digits = String(value).padStart(3, "0").split("").map(Number);
+  const amount = `${digits[0]}.${digits[1]}${digits[2]}`;
+  return { amount, digits, hand: classifyHand(digits) };
+}
+
 const handRank: Record<HandType, number> = { 普通点数: 1, 金牛: 2, 对子: 3, 顺子: 4, 反顺: 5, 满牛: 6, 豹子: 7 };
 export function compareHands(player: { type?: HandType; points: number; amount?: number }, banker: { type?: HandType; points: number; amount?: number }): "PLAYER_WIN" | "BANKER_WIN" | "TIE" {
   const playerRank = handRank[player.type ?? "普通点数"];

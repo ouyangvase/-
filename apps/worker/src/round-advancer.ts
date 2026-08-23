@@ -1,6 +1,6 @@
 import type { QueryExecutor, Project12Database } from "../../../packages/database/src/index.js";
 import type { RoundState } from "../../../packages/contracts/src/index.js";
-import { classifyPacket, demoPacketValue, hashSeed, settlePlayer } from "../../../packages/game-engine/src/index.js";
+import { classifyPacket, demoPacketValue, demoRoundHand, hashSeed, settlePlayer } from "../../../packages/game-engine/src/index.js";
 
 type DueRound = { id: string; state: RoundState; state_version: number; state_ends_at: string | Date | null; banker_user_id?: string | null };
 type InternalPacketRow = { id: string; total_amount: string | number; max_claims: string | number; claimed_amount: string | number; claimed_count: string | number };
@@ -143,9 +143,10 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     const poolRows = await client.query<{ balance: string | number }>("SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL' FOR UPDATE", []);
     if (!poolRows.rows[0]) throw new Error("Missing banker pool account");
     let bankerPool = Number(poolRows.rows[0].balance);
-    const bankerHand = classifyPacket("3.42").hand;
+    const bankerRound = demoRoundHand(workerServerSeed(), row.id);
+    const bankerHand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
     await client.query(`INSERT INTO hands (round_id, user_id, points, hand_type, cards)
-      VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (round_id, user_id) DO UPDATE SET points = EXCLUDED.points, hand_type = EXCLUDED.hand_type, cards = EXCLUDED.cards`, [row.id, current.banker_user_id, bankerHand.points, bankerHand.type, JSON.stringify([3, 4, 2])]);
+      VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (round_id, user_id) DO UPDATE SET points = EXCLUDED.points, hand_type = EXCLUDED.hand_type, cards = EXCLUDED.cards`, [row.id, current.banker_user_id, bankerHand.points, bankerHand.type, JSON.stringify(bankerRound.digits)]);
     const players = await client.query<{ user_id: string; display_name: string; bet_amount: string | number; packet_value: string | number }>(`SELECT rp.user_id, COALESCE(ti.username, u.display_name, rp.user_id::text) AS display_name,
       COALESCE(rp.bet_amount, 0) AS bet_amount, COALESCE(claim.demo_value, 0) AS packet_value
       FROM round_participants rp JOIN users u ON u.id = rp.user_id LEFT JOIN telegram_identities ti ON ti.user_id = rp.user_id
@@ -171,7 +172,7 @@ async function settleExpiredRound(database: Project12Database, row: DueRound, wo
     if (!completed.rows[0]) return false;
     const payload = { automated: true, reason: "settlement posted", bankerUserId: current.banker_user_id, bankerHand, bankerPoolAfter: bankerPool, seedHash: hashSeed(workerServerSeed()), results };
     await insertStateEvent(client, row.id, "SETTLING", "ROUND_COMPLETE", Number(completed.rows[0].state_version), workerId, payload);
-    await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id}\n${results.join("\\n")}`, { templateKey: "game.results.published", ...payload });
+    await insertInternalChatMessage(client, row.id, `📊 本局成绩已公布\n庄家：${current.banker_user_id} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}\n${results.join("\\n")}`, { templateKey: "game.results.published", ...payload, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits });
     await insertInternalChatMessage(client, row.id, "平台通知：本局已完成，内部 Demo 账本结算已写入。", { templateKey: "game.settlement.complete", ...payload });
     return true;
   });

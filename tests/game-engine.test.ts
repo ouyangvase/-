@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculatePoints, demoPacketValue, hashSeed, classifyHand, compareHands, getMultiplier, assertTransition, amountDigits, packetPoints, chooseBanker, orderClaimsForSettlement, assignTailPackets, settlePlayer } from "@project12/game-engine";
+import { calculatePoints, demoPacketValue, demoRoundHand, hashSeed, classifyHand, compareHands, getMultiplier, assertTransition, amountDigits, packetPoints, chooseBanker, orderClaimsForSettlement, assignTailPackets, settlePlayer } from "@project12/game-engine";
 import { applyJournal, assertBalanced, createTransferJournal } from "@project12/ledger";
 
 describe("demo game engine", () => {
@@ -14,6 +14,13 @@ describe("demo game engine", () => {
   });
   it("uses ordinary points as the ordinary multiplier", () => expect(getMultiplier({ type: "普通点数", points: 9 })).toBe(9));
   it("keeps packet values reproducible", () => expect(demoPacketValue("seed", "R-1", "U-1", 1)).toBe(demoPacketValue("seed", "R-1", "U-1", 1)));
+  it("derives a reproducible banker hand for each round", () => {
+    const first = demoRoundHand("seed", "R-1");
+    expect(first).toEqual(demoRoundHand("seed", "R-1"));
+    expect(first.digits).toHaveLength(3);
+    expect(first.amount).toMatch(/^\d\.\d\d$/);
+    expect(first.hand.type).toBe(classifyHand(first.digits).type);
+  });
   it("hashes the committed seed", () => expect(hashSeed("seed")).toHaveLength(64));
   it("compares player and banker without assuming a loss", () => expect(compareHands({ points: 10 }, { points: 10 })).toBe("TIE"));
   it("compares special rank before amount", () => expect(compareHands({ type: "豹子", points: 10, amount: 1 }, { type: "满牛", points: 10, amount: 99 })).toBe("PLAYER_WIN"));

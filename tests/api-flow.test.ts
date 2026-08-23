@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { demoRoundHand } from "@project12/game-engine";
 import { apiHandler } from "../apps/api/src/server";
 
 let server: Server;
@@ -155,7 +156,7 @@ describe("API round flow", () => {
     expect((await confirm.json()).result.result.state).toBe("CLAIMING");
     const claim = await write("/api/rounds/R-0247/claim", "api-flow-claim");
     expect(claim.status).toBe(200);
-    expect((await claim.json()).result.hand.type).toBe("反顺");
+    expect((await claim.json()).result.hand.type).toBe(demoRoundHand("project12-demo-seed-247", "R-0247").hand.type);
     const spectatorAuth = await request("/api/auth/telegram", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ demoUser: "api-flow-spectator" }) });
     const spectatorBody = await spectatorAuth.json() as { token?: string };
     await request("/api/admin/verification/api-flow-spectator/review", {

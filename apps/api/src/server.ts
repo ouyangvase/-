@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { assertTransition, chooseBanker, classifyHand, classifyPacket, demoRules, hashSeed, settlePlayer } from "../../../packages/game-engine/src/index.js";
+import { assertTransition, chooseBanker, classifyHand, classifyPacket, demoRoundHand, demoRules, hashSeed, settlePlayer } from "../../../packages/game-engine/src/index.js";
 import { applyJournal, assertBalanced, createTransferJournal, type Journal, type LedgerAccount } from "../../../packages/ledger/src/index.js";
 import { safeEqualText, validateTelegramInitData } from "../../../packages/telegram/src/index.js";
 import { supportedLocales as launchLocales, type Locale } from "@project12/i18n";
@@ -261,9 +261,12 @@ async function transition(to: RoundState, actor: string, payload: Record<string,
   queueOutbox("ROUND_STATE_CHANGED", { ...event });
   audit(actor, "ROUND_STATE_CHANGED", "ROUND", state.round.id, { state: from }, { state: to, ...payload });
   if (to === "BETTING" && typeof payload.amount === "number") await addRoomMessage("BANKER", `${messageActor(String(payload.banker ?? actor))} 抢庄 ${Math.max(payload.amount, Number(payload.currentHighest ?? 0))} PT，当前进入下注阶段。`, { templateKey: "game.banker.confirmed", stageKey: "BETTING_STARTED", banker: payload.banker ?? actor, amount: payload.amount, currentHighest: payload.currentHighest });
-  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注意结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
+  if (to === "WAITING_BANKER_CONFIRM" && payload.bettingClosed === true) await addRoomMessage("ROUND", `✅ 下注已结束，已记录本局 ${Number(payload.bettorCount ?? 0)} 位下注玩家。请庄家在聊天室发送任意文字确认发包；发送 /重推取消本局。旁观者不会收到领取入口。`, { templateKey: "game.packet.pending", stageKey: "BETTING_STOPPED", bettorCount: payload.bettorCount, banker: payload.banker, packetMode: "INTERNAL" });
   if (to === "PACKET_SENT" && payload.bettingClosed === true) await addRoomMessage("ROUND", `🎁 庄家已确认，平台红包已向本局 ${Number(payload.bettorCount ?? 0)} 位已下注玩家私发。旁观者不会收到领取入口。`, { templateKey: "game.packet.sent", stageKey: "PACKET_SENT", amount: payload.amount, packetId: payload.packetId, bettorCount: payload.bettorCount, packetMode: "INTERNAL" });
-  if (to === "EVALUATING" && typeof payload.claimedAt === "string") await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
+  if (to === "EVALUATING" && typeof payload.claimedAt === "string") {
+    await addRoomMessage("PACKET", `${messageActor(actor)} 已领取平台红包，抢包结束，进入算牌。`, { templateKey: "game.packet.claimedBy", stageKey: "CLAIMS_ENDED", claimSequence: payload.claimSequence, player: messageActor(actor) }, actor);
+    await addRoomMessage("ROUND", "⏳ 红包领取结束，系统正在计算牌型、比较庄家并生成成绩榜。", { templateKey: "game.results.calculating", calculation: true, roundId: state.round.id }, undefined, "PUBLIC_ROOM");
+  }
   if (to === "ROUND_COMPLETE") await addRoomMessage("SETTLEMENT", `平台通知：回合已完成，结算结果已写入 Demo 账本。`, { templateKey: "game.settlement.complete", outcome: payload.outcome });
   broadcastRoundEvent(event);
   return event;
@@ -456,7 +459,8 @@ async function executeConfirmPacket(identity: { userId: string }, key: string) {
   return { state: state.round.state, packet, bettorCount: bettorRows.length, bettingClosed: true };
 }
 async function publishRoundResults(roundId: string, packetId: string, bettorRows: Array<{ userId: string; amount: number }>, claims: Array<{ userId: string; value: number }>) {
-  const bankerHand = classifyPacket("3.42").hand;
+  const bankerRound = demoRoundHand(serverSeed, roundId);
+  const bankerHand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
   let bankerPool = state.round.bankPool;
   const rows = bettorRows.map((bettor) => {
     const claim = claims.find((item) => item.userId === bettor.userId);
@@ -481,7 +485,7 @@ async function publishRoundResults(roundId: string, packetId: string, bettorRows
   });
   roundResults.set(roundId, rows);
   const summary = rows.map((row) => `${messageActor(row.userId)} · 红包 ${row.packetValue.toFixed(2)} · ${row.hand.type}${row.hand.points} · ${row.outcome} · 下注 ${row.betAmount} PT · ${row.netReward > 0 ? `净赢 ${row.netReward.toFixed(2)}` : "无净赢"}`).join("\n");
-  await addRoomMessage("RESULTS", `📊 本局成绩已公布\n庄家：${messageActor(state.round.banker)} · ${bankerHand.type}\n${summary}`, { templateKey: "game.results.published", roundId, packetId, results: rows }, undefined, "PUBLIC_ROOM");
+  await addRoomMessage("RESULTS", `📊 本局成绩已公布\n庄家：${messageActor(state.round.banker)} · ${bankerHand.type}${bankerHand.points} · 牌面 ${bankerRound.amount}\n${summary}`, { templateKey: "game.results.published", roundId, packetId, bankerHand, bankerAmount: bankerRound.amount, bankerCards: bankerRound.digits, results: rows }, undefined, "PUBLIC_ROOM");
   return rows;
 }
 async function startNextRound(actor: string) {
@@ -521,7 +525,8 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
     results = await publishRoundResults(state.round.id, packetId, bettorRows, claims.map((item) => ({ userId: item.userId, value: item.value })));
   }
   state.round.endsAt = allClaimed ? "Done" : "00:45";
-  const hand = classifyHand([3, 4, 2]);
+  const bankerRound = demoRoundHand(serverSeed, state.round.id);
+  const hand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
   audit(identity.userId, "INTERNAL_PACKET_CLAIMED", "ROUND", state.round.id, undefined, { ...claim, allClaimed, claimedCount: claims.length });
   return { ...claim, hand, results, allClaimed, claimedCount: claims.length, maxClaims: bettorIds.length, state: state.round.state };
 }
@@ -580,14 +585,15 @@ async function finalizeDemoRound(actor: string, rows: RoundResultRow[]): Promise
   let settlement: ReturnType<typeof settlePlayer> | undefined;
   let journal: Journal | undefined;
   if (userResult && balances.USER_LOCKED > 0) {
-    const bankerHand = classifyPacket("3.42").hand;
+    const bankerRound = demoRoundHand(serverSeed, state.round.id);
+    const bankerHand = { ...bankerRound.hand, amount: Number(bankerRound.amount) };
     settlement = settlePlayer({ stake: balances.USER_LOCKED, player: userResult.hand, banker: bankerHand, bankerPool: userResult.bankerPoolBefore });
     journal = createSettlementJournal(`auto-settlement:${state.round.id}`, settlement, `J-AUTO-${state.round.id}`);
   }
   await transition("SETTLING", actor, { automated: true, journalId: journal?.id, outcome: settlement?.outcome ?? "DEMO_ONLY" });
   if (journal && settlement) {
     Object.assign(balances, applyJournal(balances, journal));
-    await persistence.persistHand(state.user.id, userResult?.hand.points ?? 0, userResult?.hand.type ?? "普通点数", [3, 4, 2]);
+    await persistence.persistHand(state.user.id, userResult?.hand.points ?? 0, userResult?.hand.type ?? "普通点数", classifyPacket(userResult?.packetValue ?? 0).digits.slice(-3));
     await persistence.persistSettlement(state.user.id, settlement.outcome);
     await persistence.persistJournal(journal, state.user.id);
     syncUserBalances();
