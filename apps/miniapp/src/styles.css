@@ -280,10 +280,17 @@ body { overflow-x: hidden; background: #000; }
 .chat-structured-bubble { width: min(330px, 82vw); padding: 13px 13px 10px; }
 .chat-structured-bubble > strong { color: #f0c875; font-size: 15px; }
 .chat-scoreboard-rows { display: grid; gap: 7px; margin-top: 11px; }
-.chat-scoreboard-rows > div { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 5px; align-items: center; color: rgba(241,239,232,.88); font-size: 12px; }
-.chat-scoreboard-rows > div > span { color: #f0c875; font-family: ui-monospace, monospace; }
-.chat-scoreboard-rows > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-scoreboard-rows > div small { color: rgba(241,239,232,.55); }
+.chat-score-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 7px; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.07); color: rgba(241,239,232,.88); font-size: 12px; }
+.chat-score-row:last-child { border-bottom: 0; }
+.chat-score-rank { color: #f0c875; font-family: ui-monospace, monospace; }
+.chat-score-player, .chat-score-hand, .chat-score-result { display: grid; min-width: 0; gap: 2px; }
+.chat-score-player strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-score-player small, .chat-score-hand small, .chat-score-result small { color: rgba(241,239,232,.55); font-size: 10px; white-space: nowrap; }
+.chat-score-hand { justify-items: end; color: #f0c875; }
+.chat-score-result { min-width: 40px; justify-items: end; }
+.chat-score-result b { color: #f0c875; }
+.chat-score-row.outcome-lose .chat-score-result b { color: rgba(241,239,232,.58); }
+.chat-score-row.outcome-watered .chat-score-result b, .chat-score-row.outcome-tie .chat-score-result b { color: #8dd9c1; }
 .chat-inline-link { min-height: 32px; margin-top: 8px; padding: 0; border: 0; color: #67a1ff; background: transparent; font-size: 12px; font-weight: 700; }
 .chat-banker-summary { border-color: rgba(86,143,225,.3); }
 .chat-banker-summary p { margin-top: 8px; font-weight: 700; }

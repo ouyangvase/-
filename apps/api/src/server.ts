@@ -52,7 +52,19 @@ const webhookUpdateIds = new Set<number>();
 const packetIds = new Map<string, string>();
 const roundBettors = new Map<string, Map<string, number>>();
 const bankerBids = new Map<string, Array<{ userId: string; amount: number; serverReceivedAt: string }>>();
-type RoundResultRow = { userId: string; betAmount: number; packetValue: number; hand: ReturnType<typeof classifyPacket>["hand"]; outcome?: "WIN" | "LOSE" | "TIE" | "WATERED" };
+type RoundResultRow = {
+  userId: string;
+  betAmount: number;
+  packetValue: number;
+  hand: ReturnType<typeof classifyPacket>["hand"];
+  outcome?: "WIN" | "LOSE" | "TIE" | "WATERED";
+  multiplier: number;
+  grossReward: number;
+  fee: number;
+  netReward: number;
+  bankerPoolBefore: number;
+  bankerPoolAfter: number;
+};
 const roundResults = new Map<string, RoundResultRow[]>();
 const riskFlags: Array<{ id: string; userId?: string; roundId?: string; status: "OPEN" | "REVIEW" | "HELD" | "CLOSED"; reason: string; createdAt: string }> = [
   { id: "RF-019", userId: "demo-player-03", status: "REVIEW", reason: "Repeated referral pairing", createdAt: now() },
@@ -72,7 +84,8 @@ function demoPhaseDuration(stateName: RoundState): number {
     WAITING_BANKER_CONFIRM: 8_000,
     CLAIMING: 15_000,
     EVALUATING: 1_000,
-    SETTLING: 1_000
+    SETTLING: 1_000,
+    ROUND_COMPLETE: 8_000
   };
   const envName: Partial<Record<RoundState, string>> = {
     BANKER_BIDDING: "DEMO_BANKER_BIDDING_MS",
@@ -80,7 +93,8 @@ function demoPhaseDuration(stateName: RoundState): number {
     WAITING_BANKER_CONFIRM: "DEMO_BANKER_CONFIRM_MS",
     CLAIMING: "DEMO_CLAIM_MS",
     EVALUATING: "DEMO_EVALUATING_MS",
-    SETTLING: "DEMO_SETTLING_MS"
+    SETTLING: "DEMO_SETTLING_MS",
+    ROUND_COMPLETE: "DEMO_COMPLETE_MS"
   };
   const override = Number(envName[stateName] ? process.env[envName[stateName]!] : undefined);
   return Number.isFinite(override) && override > 0 ? override : defaults[stateName] ?? 1_000;
@@ -443,15 +457,30 @@ async function executeConfirmPacket(identity: { userId: string }, key: string) {
 }
 async function publishRoundResults(roundId: string, packetId: string, bettorRows: Array<{ userId: string; amount: number }>, claims: Array<{ userId: string; value: number }>) {
   const bankerHand = classifyPacket("3.42").hand;
+  let bankerPool = state.round.bankPool;
   const rows = bettorRows.map((bettor) => {
     const claim = claims.find((item) => item.userId === bettor.userId);
     const packetValue = claim?.value ?? 0;
     const hand = classifyPacket(packetValue.toFixed(2)).hand;
-    const result = settlePlayer({ stake: bettor.amount, player: hand, banker: bankerHand, bankerPool: state.round.bankPool }).outcome;
-    return { userId: bettor.userId, betAmount: bettor.amount, packetValue, hand, outcome: result } satisfies RoundResultRow;
+    const bankerPoolBefore = bankerPool;
+    const settlement = settlePlayer({ stake: bettor.amount, player: hand, banker: bankerHand, bankerPool });
+    bankerPool = settlement.bankerPoolAfter;
+    return {
+      userId: bettor.userId,
+      betAmount: bettor.amount,
+      packetValue,
+      hand,
+      outcome: settlement.outcome,
+      multiplier: settlement.multiplier,
+      grossReward: settlement.grossReward,
+      fee: settlement.fee,
+      netReward: settlement.netReward,
+      bankerPoolBefore,
+      bankerPoolAfter: settlement.bankerPoolAfter
+    } satisfies RoundResultRow;
   });
   roundResults.set(roundId, rows);
-  const summary = rows.map((row) => `${messageActor(row.userId)} · ${row.hand.type} ${row.hand.points}点 · ${row.outcome} · ${row.betAmount} PT`).join("\n");
+  const summary = rows.map((row) => `${messageActor(row.userId)} · 红包 ${row.packetValue.toFixed(2)} · ${row.hand.type}${row.hand.points} · ${row.outcome} · 下注 ${row.betAmount} PT · ${row.netReward > 0 ? `净赢 ${row.netReward.toFixed(2)}` : "无净赢"}`).join("\n");
   await addRoomMessage("RESULTS", `📊 本局成绩已公布\n庄家：${messageActor(state.round.banker)} · ${bankerHand.type}\n${summary}`, { templateKey: "game.results.published", roundId, packetId, results: rows }, undefined, "PUBLIC_ROOM");
   return rows;
 }
@@ -466,6 +495,7 @@ async function startNextRound(actor: string) {
   roundBettors.delete(previousRoundId);
   packetIds.delete(previousRoundId);
   roundResults.delete(previousRoundId);
+  scheduleDemoPhase(nextRoundId, "BANKER_BIDDING");
   await addRoomMessage("ROUND", `🟢 新一局 ${nextRoundId} 已开始，等待玩家抢庄。`, { templateKey: "game.round.started", roundId: nextRoundId, previousRoundId });
   queueOutbox("ROUND_STARTED", { roundId: nextRoundId, previousRoundId, actor });
   audit(actor, "ROUND_CONTINUED", "ROUND", nextRoundId, { previousRoundId }, { state: "BANKER_BIDDING" });
@@ -497,7 +527,7 @@ async function executePacketClaim(identity: { userId: string }, key: string) {
 }
 
 function scheduleDemoPhase(roundId: string, roundState: RoundState): void {
-  if (!demoAutoRoundEnabled || roundState === "ROUND_COMPLETE") {
+  if (!demoAutoRoundEnabled || demoPhaseDuration(roundState) <= 0) {
     demoAutomationDueAt.delete(roundId);
     return;
   }
@@ -505,7 +535,7 @@ function scheduleDemoPhase(roundId: string, roundState: RoundState): void {
 }
 
 function updateDemoCountdown(): void {
-  if (!demoAutoRoundEnabled || state.round.state === "ROUND_COMPLETE") return;
+  if (!demoAutoRoundEnabled) return;
   const dueAt = demoAutomationDueAt.get(state.round.id);
   if (dueAt !== undefined) state.round.endsAt = formatDemoCountdown(dueAt - Date.now());
 }
@@ -521,7 +551,11 @@ async function seedDemoBettors(roundId: string): Promise<void> {
   ] as const;
   for (const entry of seeded) {
     if (entry.userId === bankerId || bettors.has(entry.userId)) continue;
-    bettors.set(entry.userId, entry.amount);
+    if (entry.userId === state.user.id) {
+      await executeBet({ userId: entry.userId }, `auto-bet:${roundId}:${entry.userId}`, entry.amount, "CHAT");
+    } else {
+      bettors.set(entry.userId, entry.amount);
+    }
     await addRoomMessage("USER", entry.text, { command: "BET", amount: entry.amount, mode: entry.mode, automated: true }, entry.userId);
   }
   roundBettors.set(roundId, bettors);
@@ -534,7 +568,7 @@ async function finalizeDemoRound(actor: string, rows: RoundResultRow[]): Promise
   let journal: Journal | undefined;
   if (userResult && balances.USER_LOCKED > 0) {
     const bankerHand = classifyPacket("3.42").hand;
-    settlement = settlePlayer({ stake: balances.USER_LOCKED, player: userResult.hand, banker: bankerHand, bankerPool: balances.BANKER_POOL });
+    settlement = settlePlayer({ stake: balances.USER_LOCKED, player: userResult.hand, banker: bankerHand, bankerPool: userResult.bankerPoolBefore });
     journal = createSettlementJournal(`auto-settlement:${state.round.id}`, settlement, `J-AUTO-${state.round.id}`);
   }
   await transition("SETTLING", actor, { automated: true, journalId: journal?.id, outcome: settlement?.outcome ?? "DEMO_ONLY" });
@@ -607,7 +641,7 @@ async function runDemoRoundStep(): Promise<void> {
       await transition("ROUND_COMPLETE", "demo-system", { automated: true, outcome: "DEMO_ONLY" });
       return;
     case "ROUND_COMPLETE":
-      demoAutomationDueAt.delete(roundId);
+      await startNextRound("demo-system");
       return;
     default:
       return;
@@ -616,10 +650,6 @@ async function runDemoRoundStep(): Promise<void> {
 
 async function advanceDemoRoundIfDue(): Promise<boolean> {
   if (!demoAutoRoundEnabled || process.env.NODE_ENV === "test") return false;
-  if (state.round.state === "ROUND_COMPLETE") {
-    demoAutomationDueAt.delete(state.round.id);
-    return false;
-  }
   if (!demoAutomationDueAt.has(state.round.id)) scheduleDemoPhase(state.round.id, state.round.state);
   updateDemoCountdown();
   const dueAt = demoAutomationDueAt.get(state.round.id);

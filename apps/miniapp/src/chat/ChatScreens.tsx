@@ -164,7 +164,14 @@ function Scoreboard({ message, text, locale }: { message: ChatMessage; text: str
   const rows = Array.isArray(message.payload?.results) ? message.payload?.results as Array<Record<string, unknown>> : [];
   const [showAll, setShowAll] = useState(false);
   const visibleRows = showAll ? rows : rows.slice(0, 6);
-  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>成绩</small></span><div className="chat-structured-bubble"><strong>本局成绩</strong>{visibleRows.length > 0 ? <div className="chat-scoreboard-rows">{visibleRows.map((row, index) => <div key={`${String(row.userId ?? "player")}-${index}`}><span>{index + 1}</span><strong>{String(row.userId ?? "玩家")}</strong><small>{typeof row.outcome === "string" ? row.outcome : "已结算"}</small></div>)}</div> : <p>{text}</p>}{rows.length > 6 && <button type="button" className="chat-inline-link" onClick={() => setShowAll((current) => !current)}>{showAll ? "收起成绩" : "查看全部"}</button>}<time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
+  const outcomeLabel: Record<string, string> = { WIN: "赢", LOSE: "输", TIE: "平", WATERED: "退回" };
+  const money = (value: unknown) => typeof value === "number" ? value.toFixed(2) : "—";
+  return <div className="chat-message-row chat-message-system"><span className="chat-avatar chat-avatar-bot">12</span><div className="chat-message-column"><span className="chat-message-author">12牛牛小助手 <small>成绩</small></span><div className="chat-structured-bubble"><strong>本局成绩 · 已自动算牌结算</strong>{visibleRows.length > 0 ? <div className="chat-scoreboard-rows">{visibleRows.map((row, index) => {
+    const hand = row.hand && typeof row.hand === "object" ? row.hand as Record<string, unknown> : {};
+    const outcome = typeof row.outcome === "string" ? row.outcome : "SETTLED";
+    const netReward = typeof row.netReward === "number" ? row.netReward : 0;
+    return <div className={`chat-score-row outcome-${outcome.toLowerCase()}`} key={`${String(row.userId ?? "player")}-${index}`}><span className="chat-score-rank">{index + 1}</span><span className="chat-score-player"><strong>{String(row.userId ?? "玩家")}</strong><small>红包 {money(row.packetValue)} · 下注 {String(row.betAmount ?? "—")} PT</small></span><span className="chat-score-hand"><b>{String(hand.type ?? "普通点数")}{String(hand.points ?? "—")}</b><small>x{String(row.multiplier ?? "—")}</small></span><span className="chat-score-result"><b>{outcomeLabel[outcome] ?? "已结算"}</b><small>{netReward > 0 ? `+${money(netReward)} PT` : outcome === "LOSE" ? "无净赢" : "已返还"}</small></span></div>;
+  })}</div> : <p>{text}</p>}{rows.length > 6 && <button type="button" className="chat-inline-link" onClick={() => setShowAll((current) => !current)}>{showAll ? "收起成绩" : "查看全部"}</button>}<time>{timeLabel(message.createdAt, locale)}</time></div></div></div>;
 }
 
 function BankerSummary({ message, text, locale }: { message: ChatMessage; text: string; locale: Locale }) {
