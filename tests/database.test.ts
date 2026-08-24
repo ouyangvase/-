@@ -23,13 +23,14 @@ describe("database boundary", () => {
       configured: true,
       query: async <T>(text: string) => {
         queryText = text;
-        return [{ round_id: "round-1", state: "BETTING", banker_telegram_user_id: "tg-banker", banker_pool: "0" }] as T[];
+        return [{ round_id: "round-1", state: "BETTING", banker_telegram_user_id: "tg-banker", banker_pool: "0", player_count: "3", rule_version: "12-niuniu-v1", server_seed_hash: "0123456789abcdef0123456789abcdef" }] as T[];
       }
     } as unknown as Project12Database;
     const persistence = new ApiPersistence(database);
 
-    await expect(persistence.loadRoundRuntime()).resolves.toMatchObject({ bankerUserId: "tg-banker" });
+    await expect(persistence.loadRoundRuntime()).resolves.toMatchObject({ bankerUserId: "tg-banker", playerCount: 3, ruleVersion: "12-niuniu-v1", serverSeedHash: "0123456789abcdef0123456789abcdef" });
     expect(queryText).toContain("banker_ti.telegram_user_id AS banker_telegram_user_id");
+    expect(queryText).toContain("round_participants");
   });
 
   it("reads persisted result names using Telegram identity data", async () => {

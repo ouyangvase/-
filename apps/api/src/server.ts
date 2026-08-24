@@ -745,6 +745,9 @@ async function hydrateRuntime(runtime: ApiRuntime): Promise<void> {
     runtime.state.round.endsAt = snapshot.stateEndsAt ? formatDemoCountdown(Math.max(0, Date.parse(snapshot.stateEndsAt) - Date.now())) : ["ROUND_COMPLETE", "ROUND_CANCELLED", "REFUNDED"].includes(snapshot.state) ? "完成" : runtime.state.round.endsAt;
     runtime.state.round.banker = snapshot.bankerUserId ?? runtime.state.round.banker;
     runtime.state.round.bankPool = snapshot.bankerPool;
+    runtime.state.round.players = snapshot.playerCount;
+    runtime.state.round.ruleVersion = snapshot.ruleVersion;
+    runtime.state.round.seedHash = snapshot.serverSeedHash ? `${snapshot.serverSeedHash.slice(0, 16)}…` : "—";
     runtime.balances.BANKER_POOL = snapshot.bankerPool;
   }
   const bettors = await persistence.listRoundBettors(snapshot?.roundId ?? runtime.state.round.id);

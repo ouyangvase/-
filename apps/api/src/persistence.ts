@@ -12,7 +12,16 @@ const defaultRoundId = "00000000-0000-0000-0001-000000000004";
 type AuditInput = { actor: string; action: string; referenceType: string; referenceId: string; before?: unknown; after?: unknown };
 type RoundEventInput = { roundId: string; from?: RoundState; to: RoundState; stateEndsAt?: Date | null; payload: Record<string, unknown>; actor: string };
 type WorkerHeartbeat = { workerId: string; status: string; heartbeatAt: string };
-export type RoundRuntimeSnapshot = { roundId: string; state: RoundState; stateEndsAt?: string; bankerUserId?: string; bankerPool: number };
+export type RoundRuntimeSnapshot = {
+  roundId: string;
+  state: RoundState;
+  stateEndsAt?: string;
+  bankerUserId?: string;
+  bankerPool: number;
+  playerCount: number;
+  ruleVersion: string;
+  serverSeedHash?: string;
+};
 
 type PacketRow = {
   id: string;
@@ -542,9 +551,12 @@ export class ApiPersistence implements PacketStore {
 
   async loadRoundRuntime(): Promise<RoundRuntimeSnapshot | undefined> {
     if (!this.configured) return undefined;
-    const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_telegram_user_id?: string; banker_pool: string | number }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, banker_ti.telegram_user_id AS banker_telegram_user_id,
+    const rows = await this.database.query<{ round_id: string; state: RoundState; state_ends_at?: string | Date | null; banker_telegram_user_id?: string; banker_pool: string | number; player_count: string | number; rule_version: string; server_seed_hash?: string | null }>(`SELECT r.id::text AS round_id, r.state, r.state_ends_at, banker_ti.telegram_user_id AS banker_telegram_user_id,
+      r.server_seed_hash, rrv.version AS rule_version,
+      COALESCE((SELECT COUNT(*) FROM round_participants rp WHERE rp.round_id = r.id AND rp.role = 'PLAYER' AND rp.status IN ('ELIGIBLE', 'CLAIMED', 'AUTO_CLAIMED')), 0) AS player_count,
       COALESCE((SELECT balance FROM wallet_accounts WHERE user_id IS NULL AND account_type = 'BANKER_POOL'), 0) AS banker_pool
       FROM game_rooms gr JOIN rounds r ON r.id = gr.active_round_id
+      JOIN round_rule_versions rrv ON rrv.id = r.rule_version_id
       LEFT JOIN telegram_identities banker_ti ON banker_ti.user_id = r.banker_user_id
       WHERE gr.status = 'OPEN'
       ORDER BY r.state_started_at DESC
@@ -552,7 +564,16 @@ export class ApiPersistence implements PacketStore {
     const row = rows[0];
     if (!row) return undefined;
     this.currentRoundId = row.round_id;
-    return { roundId: row.round_id, state: row.state, ...(row.state_ends_at ? { stateEndsAt: iso(row.state_ends_at) } : {}), bankerUserId: row.banker_telegram_user_id, bankerPool: Number(row.banker_pool) };
+    return {
+      roundId: row.round_id,
+      state: row.state,
+      ...(row.state_ends_at ? { stateEndsAt: iso(row.state_ends_at) } : {}),
+      bankerUserId: row.banker_telegram_user_id,
+      bankerPool: Number(row.banker_pool),
+      playerCount: Number(row.player_count),
+      ruleVersion: row.rule_version,
+      ...(row.server_seed_hash ? { serverSeedHash: row.server_seed_hash } : {})
+    };
   }
 
   async persistDevice(telegramUserId: string, publicKey: string): Promise<void> {
