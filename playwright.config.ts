@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./tests/e2e",
   use: { baseURL: "http://127.0.0.1:4173", trace: "retain-on-failure" },
   webServer: [
-    { command: "pnpm --filter @project12/api dev", url: "http://127.0.0.1:8787/health", reuseExistingServer: true },
+    { command: "node scripts/e2e-api.mjs", url: "http://127.0.0.1:8787/health/live", reuseExistingServer: true },
     { command: "pnpm --filter @project12/miniapp dev --host 127.0.0.1", url: "http://127.0.0.1:4173", reuseExistingServer: true }
   ],
   projects: [
