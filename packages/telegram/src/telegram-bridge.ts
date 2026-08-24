@@ -36,6 +36,15 @@ export function getTelegramWebApp(): TelegramWebAppLike | undefined {
   return webApp?.initData?.trim() ? webApp : undefined;
 }
 
+export function isTelegramShell(): boolean {
+  const globals = globalThis as typeof globalThis & {
+    Telegram?: { WebApp?: TelegramWebAppLike };
+    TelegramWebviewProxy?: unknown;
+  };
+  const webApp = globals.Telegram?.WebApp;
+  return Boolean(globals.TelegramWebviewProxy || (webApp?.platform && webApp.platform !== "unknown"));
+}
+
 export function isTelegramWebApp(): boolean { return Boolean(getTelegramWebApp()); }
 export function readTelegramInitData(): string { return getTelegramWebApp()?.initData?.trim() ?? ""; }
 export function readTelegramStartParam(): string { return getTelegramWebApp()?.startParam?.trim() ?? ""; }
