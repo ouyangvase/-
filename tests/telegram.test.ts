@@ -6,13 +6,13 @@ describe("Telegram boundary", () => {
   it("keeps Bot integration mock-only without a token", () => expect(demoBotResponse().status).toBe("MOCK_ONLY"));
   it("rejects missing signed initData", () => expect(() => validateTelegramInitData("", "token")).toThrow());
   it("rejects initData from too far in the future", () => expect(() => validateTelegramInitData(`auth_date=${Math.floor(Date.now() / 1000) + 120}&hash=ignored`, "token")).toThrow("expired"));
-  it("rejects signed data without query_id", () => {
+  it("accepts signed Main Mini App data without optional query_id", () => {
     const botToken = "test-token";
     const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 42 }) });
     const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
     const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
     const hash = createHmac("sha256", secret).update(dataCheckString).digest("hex");
-    expect(() => validateTelegramInitData(`${params.toString()}&hash=${hash}`, botToken)).toThrow("expired");
+    expect(validateTelegramInitData(`${params.toString()}&hash=${hash}`, botToken)).toMatchObject({ userId: "42" });
   });
   it("compares webhook secrets without accepting a length mismatch", () => {
     expect(safeEqualText("secret", "secret")).toBe(true);

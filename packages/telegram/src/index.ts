@@ -13,7 +13,10 @@ export function validateTelegramInitData(initData: string, botToken: string, max
   const receivedHash = params.get("hash");
   const authDate = Number(params.get("auth_date"));
   const age = Math.floor(Date.now() / 1000) - authDate;
-  if (!params.get("query_id") || !receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
+  // Telegram documents query_id as optional. Main Mini Apps can provide a
+  // signed user payload without it, so identity must be anchored by the
+  // signature, auth_date, and user object instead.
+  if (!receivedHash || !Number.isFinite(authDate) || age > maxAgeSeconds || age < -60) throw new Error("Invalid or expired Telegram initData");
   params.delete("hash");
   const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
   const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
