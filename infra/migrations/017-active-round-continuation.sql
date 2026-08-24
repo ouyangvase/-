@@ -14,15 +14,15 @@ WHERE id = '00000000-0000-0000-0001-000000000003'
   AND active_round_id IS NULL
   AND EXISTS (SELECT 1 FROM rounds WHERE id = '00000000-0000-0000-0001-000000000004');
 
-UPDATE game_rooms room
-SET active_round_id = latest.id
-FROM LATERAL (
+UPDATE game_rooms AS room
+SET active_round_id = (
   SELECT r.id
-  FROM rounds r
+  FROM rounds AS r
   WHERE r.room_id = room.id
   ORDER BY (r.state <> 'ROUND_COMPLETE') DESC, r.created_at DESC, r.id DESC
   LIMIT 1
-) latest
-WHERE room.active_round_id IS NULL;
+)
+WHERE room.active_round_id IS NULL
+  AND EXISTS (SELECT 1 FROM rounds AS r WHERE r.room_id = room.id);
 
 CREATE INDEX IF NOT EXISTS idx_game_rooms_active_round ON game_rooms(active_round_id);

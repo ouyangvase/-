@@ -2,11 +2,11 @@
 ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS message_seq bigint;
 
 WITH numbered AS (
-  SELECT id,
+  SELECT pending.id,
     COALESCE((SELECT MAX(existing.message_seq) FROM room_messages existing WHERE existing.room_id = pending.room_id), 0)
-      + row_number() OVER (PARTITION BY room_id ORDER BY created_at, id) AS seq
-  FROM room_messages
-  WHERE message_seq IS NULL
+      + row_number() OVER (PARTITION BY pending.room_id ORDER BY pending.created_at, pending.id) AS seq
+  FROM room_messages pending
+  WHERE pending.message_seq IS NULL
 )
 UPDATE room_messages AS room_message
 SET message_seq = numbered.seq
